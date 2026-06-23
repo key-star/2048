@@ -1,0 +1,814 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
+<title>蛋蛋大战小番茄</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-touch-callout: none; }
+body { background: #1a1a2e; display: flex; justify-content: center; align-items: center; min-height: 100dvh; font-family: Arial, sans-serif; overflow: hidden; touch-action: none; }
+canvas { display: block; border-radius: 12px; box-shadow: 0 0 40px rgba(0,0,0,.5); touch-action: none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+const SIZE = Math.min(window.innerWidth, window.innerHeight, 480);
+const CX = SIZE / 2, CY = SIZE / 2;
+const canvas = document.getElementById('c');
+canvas.width = canvas.height = SIZE;
+const ctx = canvas.getContext('2d');
+
+const PLATE_R = SIZE * .38;
+const EGG_R = SIZE * .045;
+
+let game = null;
+let touchId = null;
+let touchX = 0, touchY = 0;
+let tapTime = 0;
+
+class Vec2 {
+  constructor(x=0, y=0) { this.x = x; this.y = y; }
+  add(v) { return new Vec2(this.x + v.x, this.y + v.y); }
+  sub(v) { return new Vec2(this.x - v.x, this.y - v.y); }
+  scale(s) { return new Vec2(this.x * s, this.y * s); }
+  len() { return Math.hypot(this.x, this.y); }
+  norm() { const l = this.len(); return l > 0 ? this.scale(1 / l) : new Vec2(); }
+  distTo(v) { return this.sub(v).len(); }
+}
+
+class Particle {
+  constructor(x, y, vx, vy, r, color, life) {
+    this.pos = new Vec2(x, y);
+    this.vel = new Vec2(vx, vy);
+    this.r = r;
+    this.color = color;
+    this.life = life;
+    this.maxLife = life;
+  }
+  update() {
+    this.pos = this.pos.add(this.vel);
+    this.vel = this.vel.scale(.97);
+    this.life--;
+  }
+  draw() {
+    const a = this.life / this.maxLife;
+    ctx.globalAlpha = a;
+    ctx.fillStyle = this.color;
+    ctx.beginPath();
+    ctx.arc(this.pos.x, this.pos.y, this.r * a, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+}
+
+class Egg {
+  constructor() {
+    this.pos = new Vec2(CX, CY);
+    this.vel = new Vec2(0, 0);
+    this.r = EGG_R;
+    this.skin = 'normal';
+    this.slipping = 0;
+    this.combo = 0;
+    this.comboTimer = 0;
+  }
+
+  getSkinColor() {
+    const s = { normal: ['#fff8e7','#f0d9b5'], 溏心蛋: ['#fff3c9','#ffcc66'], 煎荷包蛋: ['#fff','#fdb813'], 茶叶蛋: ['#d4a56e','#8b6914'] };
+    return s[this.skin] || s.normal;
+  }
+
+  draw() {
+    const [base, shadow] = this.getSkinColor();
+    ctx.shadowColor = 'rgba(0,0,0,.3)';
+    ctx.shadowBlur = 8;
+    ctx.beginPath();
+    ctx.ellipse(this.pos.x, this.pos.y, this.r * 1.05, this.r * 1.1, 0, 0, Math.PI * 2);
+    ctx.fillStyle = shadow;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.ellipse(this.pos.x, this.pos.y - this.r * .05, this.r, this.r * 1.05, 0, 0, Math.PI * 2);
+    ctx.fillStyle = base;
+    ctx.fill();
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.arc(this.pos.x - this.r * .3, this.pos.y - this.r * .15, this.r * .12, 0, Math.PI * 2);
+    ctx.arc(this.pos.x + this.r * .3, this.pos.y - this.r * .15, this.r * .12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#f80';
+    ctx.beginPath();
+    ctx.moveTo(this.pos.x - this.r * .05, this.pos.y - this.r * .05);
+    ctx.lineTo(this.pos.x + this.r * .05, this.pos.y - this.r * .05);
+    ctx.lineTo(this.pos.x, this.pos.y + this.r * .05);
+    ctx.fill();
+    if (this.slipping > 0) {
+      ctx.strokeStyle = '#ff0';
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = .5 + Math.sin(Date.now() / 50) * .3;
+      for (let i = 0; i < 3; i++) {
+        const a = Math.PI * 2 / 3 * i + Date.now() / 300;
+        ctx.beginPath();
+        ctx.arc(this.pos.x, this.pos.y, this.r * 1.3 + i * 4, a - .3, a + .3);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  update(dt) {
+    if (this.slipping > 0) {
+      this.slipping--;
+      this.vel = this.vel.scale(.9);
+    }
+    this.pos = this.pos.add(this.vel.scale(dt * 4));
+    this.vel = this.vel.scale(.85);
+    const d = this.pos.sub(new Vec2(CX, CY)).len();
+    if (d > PLATE_R - this.r) {
+      this.pos = new Vec2(CX, CY).add(this.pos.sub(new Vec2(CX, CY)).norm().scale(PLATE_R - this.r));
+      this.vel = new Vec2(0, 0);
+    }
+    if (this.comboTimer > 0) this.comboTimer--;
+    else this.combo = 0;
+  }
+
+  moveTo(tx, ty) {
+    let target = new Vec2(tx, ty);
+    const toCenter = target.sub(new Vec2(CX, CY));
+    if (toCenter.len() > PLATE_R - this.r) return;
+    this.pos = this.pos.add(target.sub(this.pos).scale(.12));
+    this.vel = this.vel.scale(.5);
+  }
+
+  knockback(dir, force) {
+    this.vel = dir.scale(force);
+  }
+}
+
+class Tomato {
+  constructor(type) {
+    this.type = type;
+    this.r = type === 'big' ? EGG_R * 1.6 : type === 'boss' ? EGG_R * 2.0 : EGG_R * .9;
+    this.hp = type === 'boss' ? 8 : type === 'big' ? 3 : 1;
+    this.maxHp = this.hp;
+    this.speed = type === 'boss' ? .8 : type === 'big' ? 1.2 : .6 + Math.random() * .4;
+    const angle = Math.random() * Math.PI * 2;
+    const dist = PLATE_R + this.r + 10 + Math.random() * 30;
+    this.pos = new Vec2(CX + Math.cos(angle) * dist, CY + Math.sin(angle) * dist);
+    this.target = new Vec2(CX, CY);
+    this.shootTimer = type === 'boss' ? 60 : 0;
+    this.flash = 0;
+    this.chargeTimer = 0;
+  }
+
+  draw() {
+    const c = this.type === 'boss' ? '#e63946' : this.type === 'big' ? '#f44336' : '#ff6b6b';
+    const c2 = this.type === 'boss' ? '#c1121f' : this.type === 'big' ? '#d32f2f' : '#ee5a24';
+    ctx.shadowColor = 'rgba(0,0,0,.3)';
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.arc(this.pos.x, this.pos.y, this.r, 0, Math.PI * 2);
+    ctx.fillStyle = c;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(this.pos.x - this.r * .2, this.pos.y - this.r * .2, this.r * .5, 0, Math.PI * 2);
+    ctx.fillStyle = c2;
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(this.pos.x - this.r * .1, this.pos.y - this.r * .3, this.r * .15, 0, Math.PI * 2);
+    ctx.fillStyle = '#2d6a4f';
+    ctx.fill();
+    if (this.hp < this.maxHp) {
+      const bw = this.r * 1.2;
+      ctx.fillStyle = '#333';
+      ctx.fillRect(this.pos.x - bw / 2, this.pos.y - this.r - 8, bw, 4);
+      ctx.fillStyle = '#4caf50';
+      ctx.fillRect(this.pos.x - bw / 2, this.pos.y - this.r - 8, bw * this.hp / this.maxHp, 4);
+    }
+    if (this.type === 'big' && this.chargeTimer > 0) {
+      ctx.strokeStyle = '#ff0';
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = .5 + Math.sin(this.chargeTimer) * .3;
+      ctx.beginPath();
+      ctx.arc(this.pos.x, this.pos.y, this.r + 5 + Math.sin(this.chargeTimer * .2) * 3, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
+    if (this.flash > 0) {
+      ctx.fillStyle = '#fff';
+      ctx.globalAlpha = .4;
+      ctx.beginPath();
+      ctx.arc(this.pos.x, this.pos.y, this.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  update(dt, egg, particles) {
+    if (this.flash > 0) this.flash--;
+    if (this.hp <= 0) return false;
+
+    if (this.type === 'boss' && this.shootTimer > 0) this.shootTimer--;
+    if (this.type === 'big') {
+      const d = this.pos.distTo(egg.pos);
+      if (d < PLATE_R * .4 && this.chargeTimer === 0) this.chargeTimer = 30;
+      if (this.chargeTimer > 0) {
+        this.chargeTimer--;
+        if (this.chargeTimer === 0) {
+          const dir = egg.pos.sub(this.pos).norm();
+          this.vel = dir.scale(8);
+        }
+      }
+    }
+    if (this.chargeTimer > 0 && this.chargeTimer < 20) {
+    } else if (this.chargeTimer !== 0) {
+      this.pos = this.pos.add(this.vel.scale(dt));
+      this.vel = this.vel.scale(.95);
+      if (this.vel.len() < .5) this.vel = new Vec2();
+    } else {
+      const dir = egg.pos.sub(this.pos).norm();
+      this.pos = this.pos.add(dir.scale(this.speed * dt * 2));
+    }
+
+    if (this.type === 'boss' && this.shootTimer === 0) {
+      this.shootTimer = 80;
+      const dir = egg.pos.sub(this.pos).norm();
+      particles.push(new Particle(this.pos.x, this.pos.y, dir.x * 5, dir.y * 5, 6, '#e63946', 40));
+    }
+
+    return true;
+  }
+
+  isOnPlate() {
+    return this.pos.sub(new Vec2(CX, CY)).len() < PLATE_R - this.r;
+  }
+}
+
+class Game {
+  constructor() {
+    this.egg = new Egg();
+    this.tomatoes = [];
+    this.particles = [];
+    this.projectiles = [];
+    this.wave = 0;
+    this.score = 0;
+    this.comboCount = 0;
+    this.maxCombo = 0;
+    this.state = 'menu';
+    this.waveTimer = 0;
+    this.spawnTimer = 0;
+    this.spawnCount = 0;
+    this.waveSpawnTotal = 0;
+    this.bossSpawned = false;
+    this.unlockedSkins = ['normal'];
+    this.skinPoints = 0;
+    this.message = '';
+    this.messageTimer = 0;
+    this.splashCooldown = 0;
+    this.lastTime = performance.now();
+    this.loadProgress();
+  }
+
+  loadProgress() {
+    try {
+      const d = JSON.parse(localStorage.getItem('egg_defense') || '{}');
+      this.unlockedSkins = d.unlockedSkins || ['normal'];
+      this.skinPoints = d.skinPoints || 0;
+      this.maxCombo = d.maxCombo || 0;
+    } catch(e) {}
+  }
+
+  saveProgress() {
+    try {
+      localStorage.setItem('egg_defense', JSON.stringify({
+        unlockedSkins: this.unlockedSkins,
+        skinPoints: this.skinPoints,
+        maxCombo: this.maxCombo
+      }));
+    } catch(e) {}
+  }
+
+  startGame() {
+    this.tomatoes = [];
+    this.particles = [];
+    this.projectiles = [];
+    this.wave = 0;
+    this.score = 0;
+    this.comboCount = 0;
+    this.egg = new Egg();
+    this.egg.skin = this.unlockedSkins[this.unlockedSkins.length - 1] || 'normal';
+    this.state = 'playing';
+    this.bossSpawned = false;
+    this.nextWave();
+  }
+
+  nextWave() {
+    this.wave++;
+    this.waveTimer = 60;
+    this.spawnTimer = 0;
+    this.spawnCount = 0;
+    this.waveSpawnTotal = 6 + this.wave * 2;
+    this.bossSpawned = false;
+    if (this.wave >= 10) {
+      this.waveSpawnTotal += 1;
+    }
+  }
+
+  spawnEnemy() {
+    let type = 'normal';
+    const r = Math.random();
+    if (this.wave >= 3 && r < .15) type = 'big';
+    if (this.wave >= 5 && r < .05) type = 'big';
+    if (this.wave >= 10 && !this.bossSpawned) { type = 'boss'; this.bossSpawned = true; }
+    this.tomatoes.push(new Tomato(type));
+  }
+
+  eggSplash() {
+    if (this.splashCooldown > 0) return;
+    this.splashCooldown = 12;
+    const range = PLATE_R * .55;
+    for (let i = 0; i < 36; i++) {
+      const a = Math.PI * 2 / 36 * i + Math.random() * .2;
+      const speed = 3 + Math.random() * 4;
+      this.particles.push(new Particle(this.egg.pos.x, this.egg.pos.y, Math.cos(a) * speed, Math.sin(a) * speed, 2 + Math.random() * 3, '#fffde7', 20 + Math.random() * 15));
+    }
+    for (let t of this.tomatoes) {
+      const d = t.pos.distTo(this.egg.pos);
+      if (d < range) {
+        const dir = t.pos.sub(this.egg.pos).norm();
+        const power = 1 - d / range;
+        t.vel = dir.scale(8 + power * 12);
+        t.flash = 12;
+        t.hp -= Math.ceil(power * 2);
+        if (t.hp <= 0) {
+          this.killTomato(t);
+        }
+      }
+    }
+  }
+
+  killTomato(t) {
+    const idx = this.tomatoes.indexOf(t);
+    if (idx >= 0) this.tomatoes.splice(idx, 1);
+    this.comboCount++;
+    this.egg.combo++;
+    this.egg.comboTimer = 90;
+    if (this.comboCount > this.maxCombo) this.maxCombo = this.comboCount;
+    let pts = 10;
+    if (t.type === 'big') pts = 30;
+    if (t.type === 'boss') pts = 100;
+    if (this.comboCount > 1) pts = Math.floor(pts * (1 + this.comboCount * .1));
+    this.score += pts;
+    this.skinPoints += pts;
+    const color = t.type === 'boss' ? '#e63946' : '#ff6b6b';
+    for (let i = 0; i < 15; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const speed = 1 + Math.random() * 3;
+      this.particles.push(new Particle(t.pos.x, t.pos.y, Math.cos(a) * speed, Math.sin(a) * speed, 2 + Math.random() * 4, color, 20 + Math.random() * 15));
+    }
+    if (this.comboCount >= 3) {
+      this.showMessage(`连击 x${this.comboCount}！`, 40);
+    }
+    this.checkUnlocks();
+    this.saveProgress();
+  }
+
+  showMessage(msg, time) {
+    this.message = msg;
+    this.messageTimer = time || 60;
+  }
+
+  checkUnlocks() {
+    if (this.skinPoints >= 100 && !this.unlockedSkins.includes('溏心蛋')) {
+      this.unlockedSkins.push('溏心蛋');
+      this.showMessage('解锁皮肤：溏心蛋！', 80);
+    }
+    if (this.skinPoints >= 300 && !this.unlockedSkins.includes('煎荷包蛋')) {
+      this.unlockedSkins.push('煎荷包蛋');
+      this.showMessage('解锁皮肤：煎荷包蛋！', 80);
+    }
+    if (this.skinPoints >= 800 && !this.unlockedSkins.includes('茶叶蛋')) {
+      this.unlockedSkins.push('茶叶蛋');
+      this.showMessage('解锁皮肤：茶叶蛋！', 80);
+    }
+  }
+
+  update(dt) {
+    if (this.state !== 'playing') return;
+    if (this.splashCooldown > 0) this.splashCooldown--;
+    if (this.messageTimer > 0) this.messageTimer--;
+
+    this.egg.update(dt);
+
+    if (this.waveTimer > 0) {
+      this.waveTimer--;
+      if (this.waveTimer === 0) {
+        this.waveTimer = -1;
+      }
+      return;
+    }
+
+    this.spawnTimer++;
+    const spawnInterval = Math.max(30, 60 - this.wave * 2);
+    if (this.spawnTimer >= spawnInterval && this.spawnCount < this.waveSpawnTotal) {
+      this.spawnEnemy();
+      this.spawnCount++;
+      this.spawnTimer = 0;
+    }
+
+    for (let i = this.tomatoes.length - 1; i >= 0; i--) {
+      const t = this.tomatoes[i];
+      if (!t.update(dt, this.egg, this.particles)) {
+        this.tomatoes.splice(i, 1);
+        continue;
+      }
+      const d = t.pos.distTo(this.egg.pos);
+      if (d < t.r + this.egg.r) {
+        if (t.type === 'big' && t.chargeTimer === 0) {
+        } else if (t.type === 'big' && t.chargeTimer > 0) {
+          const dir = this.egg.pos.sub(t.pos).norm();
+          this.egg.knockback(dir.scale(-1), 8);
+          const eggD = this.egg.pos.sub(new Vec2(CX, CY)).len();
+          if (eggD >= PLATE_R - this.egg.r) {
+            this.gameOver();
+            return;
+          }
+        } else {
+          const dir = this.egg.pos.sub(t.pos).norm();
+          this.egg.knockback(dir.scale(-1), 2);
+          const eggD = this.egg.pos.sub(new Vec2(CX, CY)).len();
+          if (eggD >= PLATE_R - this.egg.r) {
+            this.gameOver();
+            return;
+          }
+        }
+      }
+      if (t.type === 'big' && t.chargeTimer === 0) {
+        const cd = t.pos.distTo(this.egg.pos);
+        if (cd < PLATE_R * .4) {
+          t.chargeTimer = 30;
+        }
+      }
+    }
+
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      this.particles[i].update();
+      if (this.particles[i].life <= 0) this.particles.splice(i, 1);
+    }
+
+    if (this.tomatoes.length === 0 && this.spawnCount >= this.waveSpawnTotal && this.waveTimer === -1) {
+      if (this.wave >= 10) {
+        this.winGame();
+      } else {
+        this.nextWave();
+      }
+    }
+  }
+
+  draw() {
+    ctx.clearRect(0, 0, SIZE, SIZE);
+    if (this.state === 'menu') { this.drawMenu(); return; }
+    if (this.state === 'gameover') { this.drawGameOver(); return; }
+    if (this.state === 'win') { this.drawWin(); return; }
+
+    ctx.fillStyle = '#f5f0e1';
+    ctx.fillRect(0, 0, SIZE, SIZE);
+
+    ctx.shadowColor = 'rgba(0,0,0,.2)';
+    ctx.shadowBlur = 15;
+    ctx.beginPath();
+    ctx.arc(CX, CY, PLATE_R, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.arc(CX, CY, PLATE_R, 0, Math.PI * 2);
+    ctx.strokeStyle = '#ddd';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(CX, CY, PLATE_R * .85, 0, Math.PI * 2);
+    ctx.strokeStyle = '#eee';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    for (let t of this.tomatoes) t.draw();
+    this.egg.draw();
+    for (let p of this.particles) p.draw();
+
+    if (this.waveTimer > 0) {
+      ctx.fillStyle = 'rgba(0,0,0,.5)';
+      ctx.fillRect(0, 0, SIZE, SIZE);
+      ctx.fillStyle = '#fff';
+      ctx.font = `bold ${SIZE * .07}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.fillText(`第 ${this.wave} 波`, CX, CY - SIZE * .04);
+      ctx.font = `${SIZE * .045}px Arial`;
+      ctx.fillText('番茄大军来袭！', CX, CY + SIZE * .03);
+    }
+
+    ctx.fillStyle = '#333';
+    ctx.font = `bold ${SIZE * .05}px Arial`;
+    ctx.textAlign = 'left';
+    ctx.fillText(`分数: ${this.score}`, SIZE * .04, SIZE * .06);
+    ctx.fillText(`波次: ${this.wave}/10`, SIZE * .04, SIZE * .11);
+    if (this.comboCount > 1) {
+      ctx.fillStyle = '#f80';
+      ctx.fillText(`连击 x${this.comboCount}`, SIZE * .04, SIZE * .16);
+    }
+    ctx.fillStyle = '#666';
+    ctx.font = `${SIZE * .035}px Arial`;
+    ctx.textAlign = 'right';
+    ctx.fillText(`皮肤: ${this.egg.skin}`, SIZE * .96, SIZE * .06);
+    ctx.fillText(`积分: ${this.skinPoints}`, SIZE * .96, SIZE *.11);
+
+    if (this.messageTimer > 0) {
+      ctx.fillStyle = '#ff6b35';
+      ctx.font = `bold ${SIZE * .07}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.globalAlpha = Math.min(1, this.messageTimer / 20);
+      ctx.fillText(this.message, CX, CY - PLATE_R * .6);
+      ctx.globalAlpha = 1;
+    }
+
+    if (this.splashCooldown > 0) {
+      ctx.fillStyle = '#fffde7';
+      ctx.globalAlpha = .15 + Math.sin(Date.now() / 30) * .1;
+      ctx.beginPath();
+      ctx.arc(this.egg.pos.x, this.egg.pos.y, this.egg.r * 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  drawMenu() {
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, SIZE, SIZE);
+    ctx.fillStyle = '#fff8e7';
+    ctx.font = `bold ${SIZE * .09}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.fillText('🥚 蛋蛋大战小番茄', CX, CY - SIZE * .25);
+    ctx.font = `${SIZE * .04}px Arial`;
+    ctx.fillStyle = '#aaa';
+    ctx.fillText('滑动控制蛋蛋 · 点击喷射蛋液', CX, CY - SIZE * .16);
+    ctx.fillText('守住餐盘，击退番茄大军！', CX, CY - SIZE * .11);
+    ctx.fillStyle = '#4caf50';
+    ctx.fillRect(CX - SIZE * .2, CY + SIZE * .02, SIZE * .4, SIZE * .08);
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${SIZE * .05}px Arial`;
+    ctx.fillText('开 始 游 戏', CX, CY + SIZE * .06);
+    ctx.fillStyle = '#8f7a66';
+    ctx.fillRect(CX - SIZE * .2, CY + SIZE * .14, SIZE * .4, SIZE * .08);
+    ctx.fillStyle = '#fff';
+    ctx.fillText('皮 肤', CX, CY + SIZE * .18);
+    if (this.unlockedSkins.length > 1) {
+      ctx.fillStyle = '#aaa';
+      ctx.font = `${SIZE * .03}px Arial`;
+      const names = this.unlockedSkins.map(s => s).join(' · ');
+      ctx.fillText(`已解锁: ${names}`, CX, CY + SIZE * .32);
+    }
+  }
+
+  drawGameOver() {
+    ctx.fillStyle = 'rgba(0,0,0,.7)';
+    ctx.fillRect(0, 0, SIZE, SIZE);
+    ctx.fillStyle = '#e63946';
+    ctx.font = `bold ${SIZE * .09}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.fillText('💀 盘子被番茄占领', CX, CY - SIZE * .2);
+    ctx.fillStyle = '#fff';
+    ctx.font = `${SIZE * .05}px Arial`;
+    ctx.fillText(`得分: ${this.score}`, CX, CY - SIZE * .08);
+    ctx.fillText(`波次: ${this.wave}/10`, CX, CY - SIZE * .02);
+    ctx.fillStyle = '#4caf50';
+    ctx.fillRect(CX - SIZE * .2, CY + SIZE * .08, SIZE * .4, SIZE * .08);
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${SIZE * .05}px Arial`;
+    ctx.fillText('重新开战', CX, CY + SIZE * .12);
+  }
+
+  drawWin() {
+    ctx.fillStyle = 'rgba(0,0,0,.7)';
+    ctx.fillRect(0, 0, SIZE, SIZE);
+    ctx.fillStyle = '#ffd700';
+    ctx.font = `bold ${SIZE * .08}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.fillText('🎉 成功守住盘子！', CX, CY - SIZE * .22);
+    ctx.fillStyle = '#fff';
+    ctx.font = `${SIZE * .045}px Arial`;
+    ctx.fillText('小番茄认输啦 🍅', CX, CY - SIZE * .12);
+    ctx.fillText(`最终得分: ${this.score}`, CX, CY - SIZE * .04);
+    ctx.fillStyle = '#4caf50';
+    ctx.fillRect(CX - SIZE * .2, CY + SIZE * .06, SIZE * .4, SIZE * .08);
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${SIZE * .05}px Arial`;
+    ctx.fillText('再来一局', CX, CY + SIZE * .1);
+  }
+
+  gameOver() {
+    this.state = 'gameover';
+    this.saveProgress();
+  }
+
+  winGame() {
+    this.state = 'win';
+    this.saveProgress();
+  }
+
+  drawSkinShop() {
+    ctx.fillStyle = '#1a1a2e';
+    ctx.fillRect(0, 0, SIZE, SIZE);
+    ctx.fillStyle = '#fff';
+    ctx.font = `bold ${SIZE * .07}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.fillText('皮肤', CX, CY - SIZE * .3);
+    const skins = [
+      { name: 'normal', label: '普通蛋', cost: 0 },
+      { name: '溏心蛋', label: '溏心蛋', cost: 100 },
+      { name: '煎荷包蛋', label: '煎荷包蛋', cost: 300 },
+      { name: '茶叶蛋', label: '茶叶蛋', cost: 800 },
+    ];
+    ctx.font = `${SIZE * .04}px Arial`;
+    for (let i = 0; i < skins.length; i++) {
+      const s = skins[i];
+      const y = CY - SIZE * .15 + i * SIZE * .12;
+      const owned = this.unlockedSkins.includes(s.name);
+      ctx.fillStyle = owned ? '#4caf50' : '#666';
+      ctx.fillRect(CX - SIZE * .35, y - SIZE * .035, SIZE * .7, SIZE * .07);
+      ctx.fillStyle = owned ? '#fff' : '#999';
+      ctx.textAlign = 'left';
+      ctx.fillText(`${s.label}${owned ? ' ✓' : ` (${s.cost}分)`}`, CX - SIZE * .3, y + SIZE * .01);
+      if (!owned && this.skinPoints >= s.cost) {
+        ctx.fillStyle = '#f80';
+        ctx.textAlign = 'right';
+        ctx.fillText('点击解锁', CX + SIZE * .3, y + SIZE * .01);
+      }
+    }
+    ctx.fillStyle = '#888';
+    ctx.textAlign = 'center';
+    ctx.fillText(`积分: ${this.skinPoints}`, CX, CY + SIZE * .38);
+    ctx.fillStyle = '#666';
+    ctx.fillRect(CX - SIZE * .15, CY + SIZE * .42, SIZE * .3, SIZE * .06);
+    ctx.fillStyle = '#fff';
+    ctx.font = `${SIZE * .04}px Arial`;
+    ctx.fillText('返回', CX, CY + SIZE * .46);
+  }
+
+  handleClick(x, y) {
+    if (this.state === 'menu') {
+      if (x > CX - SIZE * .2 && x < CX + SIZE * .2 && y > CY + SIZE * .02 && y < CY + SIZE * .1) {
+        this.startGame();
+        return;
+      }
+      if (x > CX - SIZE * .2 && x < CX + SIZE * .2 && y > CY + SIZE * .14 && y < CY + SIZE * .22) {
+        this.state = 'shop';
+        return;
+      }
+    } else if (this.state === 'shop') {
+      if (x > CX - SIZE * .15 && x < CX + SIZE * .15 && y > CY + SIZE * .42 && y < CY + SIZE * .48) {
+        this.state = 'menu';
+        return;
+      }
+      const skins = [
+        { name: 'normal', cost: 0 },
+        { name: '溏心蛋', cost: 100 },
+        { name: '煎荷包蛋', cost: 300 },
+        { name: '茶叶蛋', cost: 800 },
+      ];
+      for (let i = 0; i < skins.length; i++) {
+        const s = skins[i];
+        const sy = CY - SIZE * .15 + i * SIZE * .12;
+        if (y > sy - SIZE * .035 && y < sy + SIZE * .035) {
+          if (!this.unlockedSkins.includes(s.name) && this.skinPoints >= s.cost) {
+            this.unlockedSkins.push(s.name);
+            this.skinPoints -= s.cost;
+            this.saveProgress();
+          }
+          break;
+        }
+      }
+    } else if (this.state === 'gameover' || this.state === 'win') {
+      if (x > CX - SIZE * .2 && x < CX + SIZE * .2 && y > CY + SIZE * .08 && y < CY + SIZE * .16) {
+        this.startGame();
+      }
+    }
+  }
+}
+
+function handleTouchStart(e) {
+  e.preventDefault();
+  const t = e.touches[0];
+  touchId = t.identifier;
+  touchX = t.clientX;
+  touchY = t.clientY;
+  tapTime = Date.now();
+  const rect = canvas.getBoundingClientRect();
+  const x = (t.clientX - rect.left) / rect.width * SIZE;
+  const y = (t.clientY - rect.top) / rect.height * SIZE;
+  if (game.state === 'playing') {
+    game.egg.moveTo(x, y);
+  }
+}
+
+function handleTouchMove(e) {
+  e.preventDefault();
+  for (let t of e.changedTouches) {
+    if (t.identifier === touchId) {
+      const rect = canvas.getBoundingClientRect();
+      const x = (t.clientX - rect.left) / rect.width * SIZE;
+      const y = (t.clientY - rect.top) / rect.height * SIZE;
+      if (game && game.state === 'playing') {
+        game.egg.moveTo(x, y);
+      }
+      break;
+    }
+  }
+}
+
+function handleTouchEnd(e) {
+  e.preventDefault();
+  const elapsed = Date.now() - tapTime;
+  for (let t of e.changedTouches) {
+    if (t.identifier === touchId) {
+      const rect = canvas.getBoundingClientRect();
+      const x = (t.clientX - rect.left) / rect.width * SIZE;
+      const y = (t.clientY - rect.top) / rect.height * SIZE;
+      const dx = t.clientX - touchX;
+      const dy = t.clientY - touchY;
+      if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && elapsed < 300) {
+        if (game.state === 'playing') {
+          game.eggSplash();
+        } else {
+          game.handleClick(x, y);
+        }
+      } else if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && elapsed >= 300) {
+        game.handleClick(x, y);
+      }
+      break;
+    }
+  }
+  touchId = null;
+}
+
+canvas.addEventListener('touchstart', handleTouchStart, { passive: false });
+canvas.addEventListener('touchmove', handleTouchMove, { passive: false });
+canvas.addEventListener('touchend', handleTouchEnd, { passive: false });
+canvas.addEventListener('touchcancel', handleTouchEnd, { passive: false });
+
+canvas.addEventListener('mousedown', e => {
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width * SIZE;
+  const y = (e.clientY - rect.top) / rect.height * SIZE;
+  tapTime = Date.now();
+  touchX = e.clientX;
+  touchY = e.clientY;
+  if (game.state === 'playing') {
+    game.egg.moveTo(x, y);
+  }
+  e.preventDefault();
+});
+
+canvas.addEventListener('mousemove', e => {
+  if (e.buttons & 1 && game && game.state === 'playing') {
+    const rect = canvas.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width * SIZE;
+    const y = (e.clientY - rect.top) / rect.height * SIZE;
+    game.egg.moveTo(x, y);
+  }
+});
+
+canvas.addEventListener('mouseup', e => {
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width * SIZE;
+  const y = (e.clientY - rect.top) / rect.height * SIZE;
+  const dx = e.clientX - touchX;
+  const dy = e.clientY - touchY;
+  const elapsed = Date.now() - tapTime;
+  if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && elapsed < 300) {
+    if (game && game.state === 'playing') {
+      game.eggSplash();
+    } else if (game) {
+      game.handleClick(x, y);
+    }
+  } else if (Math.abs(dx) < 10 && Math.abs(dy) < 10 && elapsed >= 300) {
+    if (game) game.handleClick(x, y);
+  }
+});
+
+function gameLoop(time) {
+  const dt = Math.min((time - (game ? game.lastTime : time)) / 16, 3);
+  if (game) game.lastTime = time;
+  if (game) {
+    game.update(dt);
+    game.draw();
+  }
+  requestAnimationFrame(gameLoop);
+}
+
+game = new Game();
+game.draw();
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
