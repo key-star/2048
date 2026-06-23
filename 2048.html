@@ -21,8 +21,8 @@ h1 { font-size: 64px; font-weight: bold; color: #776e65; }
 .score-box .value { font-size: 22px; font-weight: bold; }
 .btn { background: #8f7a66; color: #fff; border: none; padding: 10px 20px; border-radius: 6px; font-size: 16px; cursor: pointer; }
 .btn:active { background: #9f8b76; }
-.grid-bg { background: #bbada0; border-radius: 8px; padding: 8px; display: grid; gap: 8px; grid-template-columns: repeat(4, 1fr); aspect-ratio: 1; }
-.tile { background: #cdc1b4; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 40px; font-weight: bold; color: #776e65; transition: .1s; aspect-ratio: 1; }
+.grid-bg { background: #bbada0; border-radius: 8px; padding: 8px; display: grid; gap: 8px; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(4, 1fr); aspect-ratio: 1; }
+.tile { background: #cdc1b4; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 40px; font-weight: bold; color: #776e65; overflow: hidden; width: 100%; height: 100%; }
 .tile[data-v="2"]    { background: #eee4da; }
 .tile[data-v="4"]    { background: #ede0c8; }
 .tile[data-v="8"]    { background: #f2b179; color: #f9f6f2; }
