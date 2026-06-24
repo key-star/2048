@@ -6,7 +6,7 @@
 <title>蛋蛋快跑 - 番茄大追杀</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-touch-callout: none; }
-body { background: #1a1a2e; display: flex; justify-content: center; align-items: center; min-height: 100dvh; font-family: Arial, sans-serif; overflow: hidden; touch-action: none; }
+body { background: #e8f5e9; display: flex; justify-content: center; align-items: center; min-height: 100dvh; font-family: Arial, sans-serif; overflow: hidden; touch-action: none; }
 canvas { display: block; border-radius: 12px; box-shadow: 0 0 40px rgba(0,0,0,.5); touch-action: none; }
 </style>
 </head>
@@ -343,6 +343,17 @@ class Tomato {
   }
 }
 
+const ACHIEVEMENTS = [
+  { id: 'first_game', name: '初出茅庐', desc: '完成第一局游戏', icon: '🎮', check: g => g.totalGamesPlayed >= 1 },
+  { id: 'no_splash', name: '心如止水', desc: '不释放 splash 存活 30 秒', icon: '🧘', check: g => g.bestNoSplashTime >= 30 },
+  { id: 'combo_50', name: '弹指神通', desc: '单局打出 50 连击', icon: '👆', check: g => g.maxCombo >= 50 },
+  { id: 'survivor_10min', name: '老油条', desc: '累计存活 10 分钟', icon: '⏳', check: g => g.totalSurvivalTime >= 600 },
+  { id: 'kill_500', name: '番茄杀手', desc: '累计击杀 500 个番茄', icon: '🍅', check: g => g.totalKills >= 500 },
+  { id: 'max_skin', name: '满级玩家', desc: '解锁溏心蛋皮肤', icon: '👑', check: g => g.unlockedSkins.includes('溏心蛋') },
+  { id: 'iron_wall', name: '铁壁', desc: '单局无伤存活 60 秒', icon: '🛡️', check: g => g.bestPerfectTime >= 60 },
+  { id: 'ten_games', name: '老玩家', desc: '累计游戏 10 局', icon: '🎯', check: g => g.totalGamesPlayed >= 10 },
+];
+
 class Game {
   constructor() {
     this.egg = new Egg();
@@ -360,10 +371,19 @@ class Game {
     this.nearMissTimer = 0;
     this.unlockedSkins = ['normal'];
     this.skinPoints = 0;
+    this.achievements = [];
+    this.totalKills = 0;
+    this.totalSurvivalTime = 0;
+    this.totalGamesPlayed = 0;
+    this.bestNoSplashTime = 0;
+    this.bestPerfectTime = 0;
+    this.splashUsedThisRound = false;
+    this.perfectRoundThisRound = true;
     this.message = '';
     this.messageTimer = 0;
     this.splashCooldown = 0;
     this.lastTime = performance.now();
+    this.bonusHp = 0;
     this.loadProgress();
     this.currentSkin = this.skinPoints >= 5000 ? '溏心蛋' : this.skinPoints >= 1000 ? '煎荷包蛋' : this.skinPoints >= 100 ? '茶叶蛋' : 'normal';
   }
@@ -388,6 +408,13 @@ class Game {
       this.skinPoints = d.skinPoints || 0;
       this.maxCombo = d.maxCombo || 0;
       this.bestTime = d.bestTime || 0;
+      this.achievements = d.achievements || [];
+      this.totalKills = d.totalKills || 0;
+      this.totalSurvivalTime = d.totalSurvivalTime || 0;
+      this.totalGamesPlayed = d.totalGamesPlayed || 0;
+      this.bestNoSplashTime = d.bestNoSplashTime || 0;
+      this.bestPerfectTime = d.bestPerfectTime || 0;
+      this.bonusHp = (this.achievements.includes('iron_wall') ? 1 : 0) + (this.achievements.includes('ten_games') ? 1 : 0) + (this.achievements.includes('max_skin') ? 1 : 0);
     } catch(e) {}
   }
 
@@ -398,9 +425,21 @@ class Game {
         currentSkin: this.currentSkin,
         skinPoints: this.skinPoints,
         maxCombo: this.maxCombo,
-        bestTime: this.bestTime
+        bestTime: this.bestTime,
+        achievements: this.achievements,
+        totalKills: this.totalKills,
+        totalSurvivalTime: this.totalSurvivalTime,
+        totalGamesPlayed: this.totalGamesPlayed,
+        bestNoSplashTime: this.bestNoSplashTime,
+        bestPerfectTime: this.bestPerfectTime,
+        bonusHp: this.bonusHp
       }));
     } catch(e) {}
+  }
+
+  getMaxHp() {
+    const skinHp = { normal: 3, 茶叶蛋: 3, 煎荷包蛋: 4, 溏心蛋: 5 };
+    return (skinHp[this.currentSkin] || 3) + this.bonusHp;
   }
 
   startGame() {
@@ -414,17 +453,20 @@ class Game {
     this.spawnTimer = 0;
     this.nearMissTimer = 0;
     this.egg = new Egg();
-    this.egg.hp = 3;
-    this.egg.maxHp = 3;
+    this.egg.maxHp = this.getMaxHp();
+    this.egg.hp = this.egg.maxHp;
     this.checkUnlocks();
     this.egg.skin = this.currentSkin || 'normal';
+    this.splashUsedThisRound = false;
+    this.perfectRoundThisRound = true;
     this.state = 'playing';
   }
 
   spawnEnemy() {
     let type = 'normal';
     const r = Math.random();
-    if (this.difficulty >= 12 && r < .05) type = 'explosive';
+    if (this.difficulty >= 15 && Math.random() < .03) type = 'boss';
+    else if (this.difficulty >= 12 && r < .05) type = 'explosive';
     else if (this.difficulty >= 8 && Math.random() < .08) type = 'splitter';
     else if (this.difficulty >= 5 && Math.random() < .10) type = 'shield';
     else if (this.difficulty >= 3 && Math.random() < .15) type = 'big';
@@ -436,6 +478,7 @@ class Game {
   eggSplash() {
     if (this.splashCooldown > 0) return;
     this.splashCooldown = 12;
+    this.splashUsedThisRound = true;
     const range = PLATE_R * .5;
     for (let i = 0; i < 40; i++) {
       const a = Math.PI * 2 / 40 * i + Math.random() * .15;
@@ -479,6 +522,7 @@ class Game {
   killTomato(t) {
     const idx = this.tomatoes.indexOf(t);
     if (idx >= 0) this.tomatoes.splice(idx, 1);
+    this.totalKills++;
     this.comboCount++;
     this.egg.combo++;
     this.egg.comboTimer = 90;
@@ -544,6 +588,7 @@ class Game {
     }
 
     this.checkUnlocks();
+    this.checkAchievements();
     this.saveProgress();
   }
 
@@ -561,6 +606,22 @@ class Game {
     if (this.currentSkin !== prev && !this.unlockedSkins.includes(this.currentSkin)) {
       this.unlockedSkins.push(this.currentSkin);
       this.showMessage(`解锁皮肤：${this.currentSkin}！`, 80);
+    }
+  }
+
+  checkAchievements() {
+    const hpAchs = { iron_wall: 1, ten_games: 1, max_skin: 1 };
+    for (const a of ACHIEVEMENTS) {
+      if (this.achievements.includes(a.id)) continue;
+      if (a.check(this)) {
+        this.achievements.push(a.id);
+        if (hpAchs[a.id]) {
+          this.bonusHp += hpAchs[a.id];
+          this.showMessage(`🏅 成就解锁：${a.name} · HP+${hpAchs[a.id]}！`, 80);
+        } else {
+          this.showMessage(`🏅 成就解锁：${a.name}！`, 80);
+        }
+      }
     }
   }
 
@@ -601,6 +662,7 @@ class Game {
         if (this.egg.invincible <= 0) {
           this.egg.hp--;
           this.egg.invincible = 30;
+          this.perfectRoundThisRound = false;
           this.egg.knockback(dir.scale(-1), 5);
           for (let i = 0; i < 8; i++) {
             const a = Math.random() * Math.PI * 2;
@@ -648,24 +710,24 @@ class Game {
     if (this.state === 'menu') { this.drawMenu(); return; }
     if (this.state === 'gameover') { this.drawGameOver(); return; }
 
-    ctx.fillStyle = '#f5f0e1';
+    ctx.fillStyle = '#f0faf5';
     ctx.fillRect(0, 0, SIZE, SIZE);
 
-    ctx.shadowColor = 'rgba(0,0,0,.2)';
+    ctx.shadowColor = 'rgba(0,0,0,.1)';
     ctx.shadowBlur = 15;
     ctx.beginPath();
     ctx.arc(CX, CY, PLATE_R, 0, Math.PI * 2);
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = '#fafffe';
     ctx.fill();
     ctx.shadowBlur = 0;
     ctx.beginPath();
     ctx.arc(CX, CY, PLATE_R, 0, Math.PI * 2);
-    ctx.strokeStyle = '#ddd';
+    ctx.strokeStyle = '#c8e6c9';
     ctx.lineWidth = 3;
     ctx.stroke();
     ctx.beginPath();
     ctx.arc(CX, CY, PLATE_R * .85, 0, Math.PI * 2);
-    ctx.strokeStyle = '#eee';
+    ctx.strokeStyle = '#e8f5e9';
     ctx.lineWidth = 1;
     ctx.stroke();
 
@@ -693,17 +755,17 @@ class Game {
     this.egg.draw();
     for (let p of this.particles) p.draw();
 
-    ctx.fillStyle = '#333';
+    ctx.fillStyle = '#4a7c59';
     ctx.font = `bold ${SIZE * .05}px Arial`;
     ctx.textAlign = 'left';
     ctx.fillText(`分数: ${this.score}`, SIZE * .04, SIZE * .06);
     const secs = Math.floor(this.survivalTime);
     ctx.fillText(`⏱ ${secs}秒`, SIZE * .04, SIZE * .11);
     if (this.comboCount > 1) {
-      ctx.fillStyle = '#f80';
+      ctx.fillStyle = '#ff8a65';
       ctx.fillText(`连击 x${this.comboCount}`, SIZE * .04, SIZE * .16);
     }
-    ctx.fillStyle = '#666';
+    ctx.fillStyle = '#8aa899';
     ctx.font = `${SIZE * .035}px Arial`;
     ctx.textAlign = 'right';
     const skinLabel = { normal: '普通蛋', 茶叶蛋: '茶叶蛋', 煎荷包蛋: '煎荷包蛋', 溏心蛋: '溏心蛋' };
@@ -711,24 +773,24 @@ class Game {
     ctx.fillText(`积分: ${this.skinPoints}`, SIZE * .96, SIZE *.11);
     const hpW = SIZE * .18, hpH = 8;
     const hpX = SIZE * .04, hpY = SIZE * .20;
-    ctx.fillStyle = '#333';
+    ctx.fillStyle = '#c8e6c9';
     ctx.fillRect(hpX, hpY, hpW, hpH);
-    ctx.fillStyle = this.egg.hp / this.egg.maxHp > .3 ? '#4caf50' : '#f44336';
+    ctx.fillStyle = this.egg.hp / this.egg.maxHp > .3 ? '#81c784' : '#ef9a9a';
     ctx.fillRect(hpX, hpY, hpW * this.egg.hp / this.egg.maxHp, hpH);
-    ctx.fillStyle = '#fff';
+    ctx.fillStyle = '#4a7c59';
     ctx.font = `${SIZE * .028}px Arial`;
     ctx.textAlign = 'left';
     ctx.fillText(`❤ ${this.egg.hp}/${this.egg.maxHp}`, hpX, hpY - 3);
 
     // Difficulty indicator
-    ctx.fillStyle = '#999';
+    ctx.fillStyle = '#8aa899';
     ctx.font = `${SIZE * .025}px Arial`;
     ctx.textAlign = 'center';
     const diffStars = this.difficulty < 3 ? '★☆☆' : this.difficulty < 6 ? '★★☆' : this.difficulty < 10 ? '★★★' : '★★★★';
     ctx.fillText(`难度 ${diffStars}`, CX, SIZE * .04);
 
     if (this.messageTimer > 0) {
-      ctx.fillStyle = '#ff6b35';
+      ctx.fillStyle = '#ff8a65';
       ctx.font = `bold ${SIZE * .07}px Arial`;
       ctx.textAlign = 'center';
       ctx.globalAlpha = Math.min(1, this.messageTimer / 20);
@@ -739,15 +801,15 @@ class Game {
     if (this.egg.invincible > 0 && Math.floor(Date.now() / 80) % 2 === 0) {
       ctx.beginPath();
       ctx.arc(CX, CY, this.egg.r * 1.3, 0, Math.PI * 2);
-      ctx.strokeStyle = '#ff4444';
+      ctx.strokeStyle = '#ef9a9a';
       ctx.lineWidth = 3;
-      ctx.globalAlpha = .5;
+      ctx.globalAlpha = .6;
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
     if (this.splashCooldown > 0) {
-      ctx.fillStyle = '#fffde7';
-      ctx.globalAlpha = .15 + Math.sin(Date.now() / 30) * .1;
+      ctx.fillStyle = '#fff9c4';
+      ctx.globalAlpha = .2 + Math.sin(Date.now() / 30) * .1;
       ctx.beginPath();
       ctx.arc(this.egg.pos.x, this.egg.pos.y, this.egg.r * 3, 0, Math.PI * 2);
       ctx.fill();
@@ -756,62 +818,92 @@ class Game {
   }
 
   drawMenu() {
-    ctx.fillStyle = '#1a1a2e';
+    ctx.fillStyle = '#f0faf0';
     ctx.fillRect(0, 0, SIZE, SIZE);
     const skinLabel = { normal: '普通蛋', 茶叶蛋: '茶叶蛋', 煎荷包蛋: '煎荷包蛋', 溏心蛋: '溏心蛋' };
     const skinOrder = ['normal', '茶叶蛋', '煎荷包蛋', '溏心蛋'];
     const idx = skinOrder.indexOf(this.currentSkin);
     const nextIdx = Math.min(idx + 1, skinOrder.length - 1);
     const nextSkin = skinOrder[nextIdx];
-    const costs = { normal: 0, 茶叶蛋: 100, 煎荷包蛋: 500, 溏心蛋: 3000 };
+    const costs = { normal: 0, 茶叶蛋: 100, 煎荷包蛋: 1000, 溏心蛋: 5000 };
     const curCost = costs[this.currentSkin];
     const nextCost = costs[nextSkin];
-    ctx.fillStyle = '#fff8e7';
+    const baseHpMap = { normal: 3, 茶叶蛋: 3, 煎荷包蛋: 4, 溏心蛋: 5 };
+    ctx.fillStyle = '#4a7c59';
     ctx.font = `bold ${SIZE * .09}px Arial`;
     ctx.textAlign = 'center';
-    ctx.fillText('🥚 蛋蛋快跑', CX, CY - SIZE * .30);
-    ctx.font = `${SIZE * .04}px Arial`;
-    ctx.fillStyle = '#aaa';
-    ctx.fillText('拖动蛋蛋躲避 · 松手蛋液击退番茄', CX, CY - SIZE * .20);
-    ctx.fillText('在番茄围攻中活下来！越久越好！', CX, CY - SIZE * .15);
-    this.drawSkinPreview(CX, CY - SIZE * .02, SIZE * .055, this.currentSkin);
-    ctx.fillStyle = '#ccc';
-    ctx.font = `bold ${SIZE * .045}px Arial`;
-    ctx.fillText(`🏆 ${skinLabel[this.currentSkin] || '普通蛋'}`, CX, CY + SIZE * .11);
+    ctx.fillText('🥚 蛋蛋快跑', CX, CY - SIZE * .31);
+    ctx.font = `${SIZE * .035}px Arial`;
+    ctx.fillStyle = '#8aa899';
+    ctx.fillText('拖动蛋蛋躲避 · 松手蛋液击退番茄', CX, CY - SIZE * .24);
+    ctx.fillText('在番茄围攻中活下来！越久越好！', CX, CY - SIZE * .19);
+    this.drawSkinPreview(CX, CY - SIZE * .08, SIZE * .055, this.currentSkin);
+    // Skin name + HP simplified
+    const showMaxHp = this.getMaxHp();
+    ctx.fillStyle = '#5a8a69';
+    ctx.font = `bold ${SIZE * .042}px Arial`;
+    ctx.fillText(`🏆 ${skinLabel[this.currentSkin] || '普通蛋'}  ❤${showMaxHp}`, CX, CY + SIZE * .07);
+    // Progress bar
+    const barW = SIZE * .30, barH = 5, barX = CX - barW / 2, barY = CY + SIZE * .12;
     if (this.currentSkin === '溏心蛋') {
       ctx.fillStyle = '#f0a500';
-      ctx.font = `${SIZE * .035}px Arial`;
-      ctx.fillText(`✨ 满级 · 累计 ${this.skinPoints} 分`, CX, CY + SIZE * .17);
+      ctx.font = `${SIZE * .024}px Arial`;
+      ctx.fillText(`✨ 满级 · 累计 ${this.skinPoints} 分`, CX, barY + SIZE * .05);
     } else if (this.skinPoints >= nextCost) {
       ctx.fillStyle = '#f0a500';
-      ctx.font = `${SIZE * .03}px Arial`;
-      ctx.fillText(`已达标！再杀几个番茄就能升级`, CX, CY + SIZE * .165);
+      ctx.font = `${SIZE * .022}px Arial`;
+      ctx.fillText('已达标！再杀几个番茄就能升级', CX, barY + SIZE * .05);
     } else {
-      const barW = SIZE * .4, barH = 8, barX = CX - barW / 2, barY = CY + SIZE * .14;
       const progress = Math.max(0, (this.skinPoints - curCost) / (nextCost - curCost));
-      ctx.fillStyle = '#333';
-      ctx.fillRect(barX, barY, barW, barH);
-      ctx.fillStyle = '#f0a500';
-      ctx.fillRect(barX, barY, barW * Math.min(1, progress), barH);
-      ctx.fillStyle = '#888';
-      ctx.font = `${SIZE * .025}px Arial`;
+      ctx.fillStyle = '#c8e6c9';
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, barW, barH, 3);
+      ctx.fill();
+      ctx.fillStyle = '#81c784';
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, barW * Math.min(1, progress), barH, 3);
+      ctx.fill();
+      ctx.fillStyle = '#7a9a79';
+      ctx.font = `${SIZE * .02}px Arial`;
       const need = Math.max(1, nextCost - this.skinPoints);
-      ctx.fillText(`再得 ${need} 分 → ${skinLabel[nextSkin]}`, CX, barY + barH + SIZE * .03);
+      ctx.fillText(`再得 ${need} 分 → ${skinLabel[nextSkin]}`, CX, barY + barH + SIZE * .025);
     }
-    ctx.fillStyle = '#4caf50';
-    ctx.fillRect(CX - SIZE * .22, CY + SIZE * .22, SIZE * .44, SIZE * .09);
+    ctx.fillStyle = '#81c784';
+    ctx.beginPath();
+    ctx.roundRect(CX - SIZE * .18, CY + SIZE * .20, SIZE * .36, SIZE * .07, 8);
+    ctx.fill();
     ctx.fillStyle = '#fff';
-    ctx.font = `bold ${SIZE * .05}px Arial`;
-    ctx.fillText('开始游戏', CX, CY + SIZE * .275);
-    ctx.fillStyle = '#444';
-    ctx.font = `${SIZE * .025}px Arial`;
-    ctx.fillText('重置数据', CX, CY + SIZE * .34);
+    ctx.font = `bold ${SIZE * .04}px Arial`;
+    ctx.fillText('开始游戏', CX, CY + SIZE * .248);
+    ctx.fillStyle = '#bbb';
+    ctx.font = `${SIZE * .024}px Arial`;
+    ctx.fillText('重置数据', CX, CY + SIZE * .30);
+    // Achievements grid: 4 per row, 2 rows
+    const achFont = SIZE * .028;
+    ctx.font = `${achFont}px Arial`;
+    ctx.textAlign = 'left';
+    const names = ACHIEVEMENTS.map(a => ({ icon: a.icon, name: a.name, unlocked: this.achievements.includes(a.id) }));
+    const colW = SIZE * .23;
+    const rowH = SIZE * .034;
+    const gridY = CY + SIZE * .355;
+    const gridX = CX - SIZE * .43;
+    for (let i = 0; i < names.length; i++) {
+      const col = i % 4;
+      const row = Math.floor(i / 4);
+      const gx = gridX + col * colW;
+      const gy = gridY + row * rowH;
+      ctx.fillStyle = names[i].unlocked ? '#4a7c59' : '#ccc';
+      ctx.fillText(names[i].icon, gx, gy);
+      ctx.fillStyle = names[i].unlocked ? '#6a9c79' : '#aaa';
+      ctx.fillText(names[i].name, gx + SIZE * .036, gy);
+    }
+    ctx.textAlign = 'center';
   }
 
   drawGameOver() {
     ctx.fillStyle = 'rgba(0,0,0,.7)';
     ctx.fillRect(0, 0, SIZE, SIZE);
-    ctx.fillStyle = '#e63946';
+    ctx.fillStyle = '#ef5350';
     ctx.font = `bold ${SIZE * .09}px Arial`;
     ctx.textAlign = 'center';
     ctx.fillText('💀 盘子被番茄占领', CX, CY - SIZE * .25);
@@ -828,17 +920,17 @@ class Game {
       this.bestTime = secs;
       this.saveProgress();
     } else if (this.bestTime > 0) {
-      ctx.fillStyle = '#aaa';
+      ctx.fillStyle = '#bdbdbd';
       ctx.font = `${SIZE * .035}px Arial`;
       ctx.fillText(`最高纪录: ${Math.floor(this.bestTime)} 秒 (差 ${Math.floor(this.bestTime - secs)} 秒)`, CX, CY - SIZE * .03);
     }
-    ctx.fillStyle = '#4caf50';
+    ctx.fillStyle = '#81c784';
     ctx.fillRect(CX - SIZE * .2, CY + SIZE * .06, SIZE * .4, SIZE * .08);
     ctx.fillStyle = '#fff';
     ctx.font = `bold ${SIZE * .05}px Arial`;
     ctx.textAlign = 'center';
     ctx.fillText('再来一次', CX, CY + SIZE * .125);
-    ctx.fillStyle = '#8f7a66';
+    ctx.fillStyle = '#a5d6a7';
     ctx.fillRect(CX - SIZE * .2, CY + SIZE * .17, SIZE * .4, SIZE * .07);
     ctx.fillStyle = '#fff';
     ctx.font = `bold ${SIZE * .035}px Arial`;
@@ -851,6 +943,15 @@ class Game {
     if (secs > this.bestTime) {
       this.bestTime = secs;
     }
+    this.totalGamesPlayed++;
+    this.totalSurvivalTime += this.survivalTime;
+    if (!this.splashUsedThisRound && this.survivalTime > this.bestNoSplashTime) {
+      this.bestNoSplashTime = this.survivalTime;
+    }
+    if (this.perfectRoundThisRound && this.survivalTime > this.bestPerfectTime) {
+      this.bestPerfectTime = this.survivalTime;
+    }
+    this.checkAchievements();
     this.saveProgress();
   }
 
@@ -897,23 +998,44 @@ class Game {
   }
 
   resetData() {
-    if (confirm('确定重置所有数据吗？（分数、皮肤、记录全部清零）')) {
+    if (confirm('确定重置所有数据吗？（分数、皮肤、成就、记录全部清零）')) {
       localStorage.removeItem('egg_defense');
       this.unlockedSkins = ['normal'];
       this.skinPoints = 0;
       this.maxCombo = 0;
       this.bestTime = 0;
       this.currentSkin = 'normal';
+      this.achievements = [];
+      this.totalKills = 0;
+      this.totalSurvivalTime = 0;
+      this.totalGamesPlayed = 0;
+      this.bestNoSplashTime = 0;
+      this.bestPerfectTime = 0;
+      this.bonusHp = 0;
     }
   }
 
   handleClick(x, y) {
     if (this.state === 'menu') {
-      if (x > CX - SIZE * .22 && x < CX + SIZE * .22 && y > CY + SIZE * .22 && y < CY + SIZE * .31) {
+      if (x > CX - SIZE * .18 && x < CX + SIZE * .18 && y > CY + SIZE * .20 && y < CY + SIZE * .27) {
         this.startGame();
       }
-      if (y > CY + SIZE * .32 && y < CY + SIZE * .36) {
+      if (y > CY + SIZE * .28 && y < CY + SIZE * .33) {
         this.resetData();
+      }
+      // Achievement grid click
+    const colW = SIZE * .23;
+    const gridY = CY + SIZE * .355;
+      const rowH = SIZE * .034;
+      if (y > gridY - rowH && y < gridY + rowH * 2) {
+        const row = Math.floor((y - gridY) / rowH);
+        const col = Math.floor((x - (CX - SIZE * .43)) / colW);
+        const idx = row * 4 + col;
+        if (idx >= 0 && idx < ACHIEVEMENTS.length) {
+          const a = ACHIEVEMENTS[idx];
+          const unlocked = this.achievements.includes(a.id);
+          this.showMessage(`${unlocked ? a.icon : '🔒'} ${a.name}${unlocked ? ': ' + a.desc : ' (未解锁)'}`, 100);
+        }
       }
     } else if (this.state === 'gameover') {
       if (x > CX - SIZE * .2 && x < CX + SIZE * .2 && y > CY + SIZE * .06 && y < CY + SIZE * .14) {
@@ -934,22 +1056,22 @@ class Game {
     const secs = Math.floor(this.survivalTime);
     const isNewBest = secs >= this.bestTime;
     const gradient = pctx.createLinearGradient(0, 0, 0, PH);
-    gradient.addColorStop(0, '#1a1a2e');
-    gradient.addColorStop(1, '#16213e');
+    gradient.addColorStop(0, '#e8f5e9');
+    gradient.addColorStop(1, '#c8e6c9');
     pctx.fillStyle = gradient;
     pctx.fillRect(0, 0, PW, PH);
     // Decorative circles
     for (let i = 0; i < 12; i++) {
       pctx.beginPath();
       pctx.arc(30 + Math.random() * (PW - 60), 30 + Math.random() * (PH - 60), 2 + Math.random() * 8, 0, Math.PI * 2);
-      pctx.fillStyle = `rgba(255,255,255,${.03 + Math.random() * .06})`;
+      pctx.fillStyle = `rgba(74,124,89,${.03 + Math.random() * .06})`;
       pctx.fill();
     }
     pctx.textAlign = 'center';
-    pctx.fillStyle = '#fff8e7';
+    pctx.fillStyle = '#4a7c59';
     pctx.font = 'bold 40px Arial';
     pctx.fillText('🥚 蛋蛋快跑', PW / 2, 80);
-    pctx.fillStyle = '#888';
+    pctx.fillStyle = '#8aa899';
     pctx.font = '18px Arial';
     pctx.fillText('在番茄围攻中活下来！越久越好！', PW / 2, 115);
     // Divider
@@ -1001,21 +1123,20 @@ class Game {
     }
     pctx.restore();
     // Stats
-    pctx.fillStyle = '#e63946';
+    pctx.fillStyle = '#ef5350';
     pctx.font = 'bold 64px Arial';
     pctx.fillText(`⏱ ${secs}`, PW / 2, 370);
-    pctx.fillStyle = '#aaa';
+    pctx.fillStyle = '#8aa899';
     pctx.font = '22px Arial';
     pctx.fillText('存活秒数', PW / 2, 405);
-    pctx.fillStyle = '#fff';
     pctx.fillStyle = '#f0a500';
     pctx.font = 'bold 36px Arial';
     pctx.fillText(`${this.score} 分`, PW / 2, 480);
-    pctx.fillStyle = '#aaa';
+    pctx.fillStyle = '#8aa899';
     pctx.font = '20px Arial';
     pctx.fillText('得分', PW / 2, 510);
     // Skin tier
-    pctx.fillStyle = '#666';
+    pctx.fillStyle = '#6a9c79';
     pctx.font = '18px Arial';
     pctx.fillText(`段位: ${skinLabel[this.currentSkin] || '普通蛋'}`, PW / 2, 560);
     // Best record
@@ -1029,7 +1150,7 @@ class Game {
       pctx.fillText(`最高纪录: ${Math.floor(this.bestTime)} 秒`, PW / 2, 610);
     }
     // Footer
-    pctx.fillStyle = 'rgba(255,255,255,.15)';
+    pctx.fillStyle = 'rgba(74,124,89,.2)';
     pctx.font = '14px Arial';
     pctx.fillText('蛋蛋快跑 · 番茄大追杀', PW / 2, PH - 30);
     // Generate & share
