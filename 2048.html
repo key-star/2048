@@ -42,9 +42,12 @@ h1 { font-size: 64px; font-weight: bold; color: #776e65; }
 <div class="container">
   <div class="header">
     <h1>2048</h1>
-    <div class="score-box">
-      <div class="label">分数</div>
-      <div class="value" id="score">0</div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <div class="score-box">
+        <div class="label">分数</div>
+        <div class="value" id="score">0</div>
+      </div>
+      <button class="btn" onclick="startGame()">新游戏</button>
     </div>
   </div>
   <div class="grid-bg" id="grid"></div>
@@ -66,6 +69,25 @@ function initGrid() {
   score = 0; over = false;
   spawn(); spawn();
   render();
+}
+
+function saveState() {
+  localStorage.setItem('game2048', JSON.stringify({ grid, score, over }));
+}
+
+function loadState() {
+  const raw = localStorage.getItem('game2048');
+  if (!raw) return false;
+  try {
+    const data = JSON.parse(raw);
+    if (data.grid && data.grid.length === SIZE) {
+      grid = data.grid; score = data.score; over = data.over;
+      render();
+      if (over) checkGameOver();
+      return true;
+    }
+  } catch {}
+  return false;
 }
 
 function spawn() {
@@ -124,9 +146,10 @@ function checkGameOver() {
 function render() {
   gridEl.innerHTML = grid.map(row => row.map(v => `<div class="tile" data-v="${v}">${v || ''}</div>`).join('')).join('');
   scoreEl.textContent = score;
+  saveState();
 }
 
-function startGame() { msgEl.innerHTML = ''; initGrid(); }
+function startGame() { localStorage.removeItem('game2048'); msgEl.innerHTML = ''; initGrid(); }
 
 document.addEventListener('keydown', e => {
   if (e.key.startsWith('Arrow')) { e.preventDefault(); move({ArrowLeft:0,ArrowRight:1,ArrowUp:2,ArrowDown:3}[e.key]); }
@@ -154,7 +177,7 @@ document.addEventListener('touchend', e => {
   move(absX > absY ? (dx > 0 ? 1 : 0) : (dy > 0 ? 3 : 2));
 });
 
-startGame();
+if (!loadState()) startGame();
 </script>
 </body>
 </html>
