@@ -10,7 +10,6 @@
 .dpad-btn { width: 64px; height: 64px; border: none; border-radius: 8px; background: #bbada0; color: #fff; font-size: 28px; cursor: pointer; display: flex; align-items: center; justify-content: center; user-select: none; -webkit-tap-highlight-color: transparent; }
 .dpad-btn:active { background: #9f8b76; }
 .dpad-btn.empty { background: transparent; pointer-events: none; }
-@media (min-width: 520px) { .dpad { display: none; } }
 * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
 body { background: #faf8ef; font-family: Arial, sans-serif; display: flex; justify-content: center; padding-top: 40px; touch-action: none; }
 .container { width: 500px; max-width: 94vw; }
@@ -34,28 +33,39 @@ h1 { font-size: 64px; font-weight: bold; color: #776e65; }
 .tile[data-v="512"]  { background: #edc850; color: #f9f6f2; font-size: 34px; }
 .tile[data-v="1024"] { background: #edc53f; color: #f9f6f2; font-size: 28px; }
 .tile[data-v="2048"] { background: #edc22e; color: #f9f6f2; font-size: 28px; }
-.msg { text-align: center; margin-top: 16px; font-size: 18px; min-height: 28px; color: #776e65; }
-.msg button { margin-left: 10px; }
+.above-game { display: flex; justify-content: space-between; align-items: center; margin: 12px 0; }
+.game-intro { font-size: 15px; color: #776e65; line-height: 1.4; }
+.game-container { position: relative; }
+.msg {
+  display: none; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(238,228,218,0.6); border-radius: 8px; z-index: 100;
+  flex-direction: column; align-items: center; justify-content: center; gap: 20px;
+}
+.msg.show { display: flex; }
+.msg p { font-size: 44px; font-weight: bold; color: #776e65; margin: 0; }
 </style>
 </head>
 <body>
 <div class="container">
   <div class="header">
     <h1>2048</h1>
-    <div style="display:flex;align-items:center;gap:8px">
-      <div class="score-box">
-        <div class="label">分数</div>
-        <div class="value" id="score">0</div>
-      </div>
-      <button class="btn" onclick="startGame()">新游戏</button>
+    <div class="score-box">
+      <div class="label">分数</div>
+      <div class="value" id="score">0</div>
     </div>
   </div>
-  <div class="grid-bg" id="grid"></div>
+  <div class="above-game">
+    <p class="game-intro">滑动方块，合成 <strong>2048!</strong></p>
+    <button class="btn" onclick="startGame()">重新开始</button>
+  </div>
+  <div class="game-container">
+    <div class="grid-bg" id="grid"></div>
+    <div class="msg" id="msg"><p></p></div>
+  </div>
   <div class="dpad" id="dpad">
     <div class="dpad-row"><button class="dpad-btn empty"></button><button class="dpad-btn" data-dir="2">▲</button><button class="dpad-btn empty"></button></div>
     <div class="dpad-row"><button class="dpad-btn" data-dir="0">◀</button><button class="dpad-btn" data-dir="3">▼</button><button class="dpad-btn" data-dir="1">▶</button></div>
   </div>
-  <div class="msg" id="msg"><button class="btn" onclick="startGame()">新游戏</button></div>
 </div>
 <script>
 const SIZE = 4;
@@ -131,15 +141,28 @@ function move(d) {
 
 function transpose(m) { return m[0].map((_, i) => m.map(r => r[i])); }
 
+function showMsg(text) {
+  msgEl.querySelector('p').textContent = text;
+  let btn = msgEl.querySelector('button');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.className = 'btn';
+    btn.textContent = '再来一局';
+    btn.onclick = startGame;
+    msgEl.appendChild(btn);
+  }
+  msgEl.classList.add('show');
+}
+
 function checkGameOver() {
-  if (grid.some(r => r.some(v => v === 2048))) { msgEl.innerHTML = '🎉 你赢了！<button class="btn" onclick="startGame()">再来一局</button>'; over = true; return; }
+  if (grid.some(r => r.some(v => v === 2048))) { showMsg('🎉 你赢了！'); over = true; return; }
   for (let r = 0; r < SIZE; r++)
     for (let c = 0; c < SIZE; c++) {
       if (!grid[r][c]) return;
       if (c < SIZE - 1 && grid[r][c] === grid[r][c + 1]) return;
       if (r < SIZE - 1 && grid[r][c] === grid[r + 1][c]) return;
     }
-  msgEl.innerHTML = '💀 游戏结束 <button class="btn" onclick="startGame()">再来一局</button>';
+  showMsg('💀 游戏结束');
   over = true;
 }
 
@@ -149,7 +172,7 @@ function render() {
   saveState();
 }
 
-function startGame() { localStorage.removeItem('game2048'); msgEl.innerHTML = ''; initGrid(); }
+function startGame() { localStorage.removeItem('game2048'); msgEl.classList.remove('show'); initGrid(); }
 
 document.addEventListener('keydown', e => {
   if (e.key.startsWith('Arrow')) { e.preventDefault(); move({ArrowLeft:0,ArrowRight:1,ArrowUp:2,ArrowDown:3}[e.key]); }
