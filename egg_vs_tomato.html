@@ -74,6 +74,7 @@ class Egg {
     this.hp = 3;
     this.maxHp = 3;
     this.invincible = 0;
+    this.target = null;
   }
 
   getSkinColor() {
@@ -144,6 +145,24 @@ class Egg {
   }
 
   update(dt) {
+    if (this.vel.len() > 0) {
+      this.pos = this.pos.add(this.vel);
+      this.vel = this.vel.scale(.85);
+      if (this.vel.len() < .3) this.vel = new Vec2();
+    }
+    if (this.target) {
+      const diff = this.target.sub(this.pos);
+      if (diff.len() > 1) {
+        this.pos = this.pos.add(diff.scale(.35));
+      } else {
+        this.target = null;
+      }
+    }
+    const toCenter = this.pos.sub(new Vec2(CX, CY));
+    if (toCenter.len() > PLATE_R - this.r) {
+      this.pos = new Vec2(CX, CY).add(toCenter.norm().scale(PLATE_R - this.r));
+      this.vel = new Vec2();
+    }
     if (this.slipping > 0) this.slipping--;
     if (this.invincible > 0) this.invincible--;
     if (this.comboTimer > 0) this.comboTimer--;
@@ -156,8 +175,9 @@ class Egg {
     if (toCenter.len() > PLATE_R - this.r) {
       target = new Vec2(CX, CY).add(toCenter.norm().scale(PLATE_R - this.r));
     }
-    this.pos = this.pos.add(target.sub(this.pos).scale(.15));
-    this.vel = new Vec2(0, 0);
+    this.target = target;
+    const diff = this.target.sub(this.pos);
+    if (diff.len() > 1) this.pos = this.pos.add(diff.scale(.35));
   }
 
   knockback(dir, force) {
@@ -180,7 +200,7 @@ class Tomato {
       this.r = type === 'big' ? EGG_R * 1.6 : type === 'boss' ? EGG_R * 2.0 : type === 'shield' || type === 'explosive' ? EGG_R * 1.3 : type === 'splitter' ? EGG_R * 1.1 : EGG_R * .9;
       this.hp = type === 'boss' ? 8 : type === 'big' ? 3 : type === 'shield' ? 2 : 1;
       this.maxHp = this.hp;
-      this.speed = type === 'boss' ? .8 : type === 'big' ? 1.2 : type === 'seed' ? 1.5 : .6 + Math.random() * .4;
+      this.speed = type === 'boss' ? .8 : type === 'big' ? .7 : type === 'seed' ? 1.5 : .6 + Math.random() * .4;
       const angle = Math.random() * Math.PI * 2;
       const dist = PLATE_R + this.r + 10 + Math.random() * 30;
       this.pos = new Vec2(CX + Math.cos(angle) * dist, CY + Math.sin(angle) * dist);
@@ -345,7 +365,7 @@ class Game {
     this.splashCooldown = 0;
     this.lastTime = performance.now();
     this.loadProgress();
-    this.currentSkin = this.skinPoints >= 3000 ? '溏心蛋' : this.skinPoints >= 500 ? '煎荷包蛋' : this.skinPoints >= 100 ? '茶叶蛋' : 'normal';
+    this.currentSkin = this.skinPoints >= 5000 ? '溏心蛋' : this.skinPoints >= 1000 ? '煎荷包蛋' : this.skinPoints >= 100 ? '茶叶蛋' : 'normal';
   }
 
   getSpawnInterval() {
@@ -463,11 +483,11 @@ class Game {
     this.egg.combo++;
     this.egg.comboTimer = 90;
     if (this.comboCount > this.maxCombo) this.maxCombo = this.comboCount;
-    let pts = 10;
-    if (t.type === 'big') pts = 30;
-    if (t.type === 'boss') pts = 100;
-    if (t.type === 'explosive' || t.type === 'splitter') pts = 15;
-    if (t.type === 'shield') pts = 20;
+    let pts = 6;
+    if (t.type === 'big') pts = 15;
+    if (t.type === 'boss') pts = 30;
+    if (t.type === 'explosive' || t.type === 'splitter') pts = 10;
+    if (t.type === 'shield') pts = 12;
     if (this.comboCount > 1) pts = Math.floor(pts * (1 + this.comboCount * .1));
     this.score += pts;
     this.skinPoints += pts;
@@ -534,8 +554,8 @@ class Game {
 
   checkUnlocks() {
     const prev = this.currentSkin;
-    if (this.skinPoints >= 3000) this.currentSkin = '溏心蛋';
-    else if (this.skinPoints >= 500) this.currentSkin = '煎荷包蛋';
+    if (this.skinPoints >= 5000) this.currentSkin = '溏心蛋';
+    else if (this.skinPoints >= 1000) this.currentSkin = '煎荷包蛋';
     else if (this.skinPoints >= 100) this.currentSkin = '茶叶蛋';
     else this.currentSkin = 'normal';
     if (this.currentSkin !== prev && !this.unlockedSkins.includes(this.currentSkin)) {
@@ -566,9 +586,9 @@ class Game {
       const t = this.tomatoes[i];
       if (!t.update(dt, this.egg, this.particles)) {
         if (t.hp > 0) {
-          const pts = t.type === 'boss' ? 100 : t.type === 'big' ? 30 : 10;
+          const pts = t.type === 'boss' ? 30 : t.type === 'big' ? 15 : 8;
           this.score += pts;
-          this.skinPoints += pts;
+          this.skinPoints += Math.floor(pts * 0.3);
         }
         this.tomatoes.splice(i, 1);
         continue;
@@ -581,6 +601,7 @@ class Game {
         if (this.egg.invincible <= 0) {
           this.egg.hp--;
           this.egg.invincible = 30;
+          this.egg.knockback(dir.scale(-1), 5);
           for (let i = 0; i < 8; i++) {
             const a = Math.random() * Math.PI * 2;
             this.particles.push(new Particle(this.egg.pos.x, this.egg.pos.y, Math.cos(a) * 4, Math.sin(a) * 4, 4, '#ff4444', 20));
@@ -1062,6 +1083,7 @@ function handleTouchEnd(e) {
       const y = (t.clientY - rect.top) / rect.height * SIZE;
       if (game.state === 'playing') {
         game.eggSplash();
+        game.egg.target = null;
       } else {
         game.handleClick(x, y);
       }
@@ -1104,6 +1126,7 @@ canvas.addEventListener('mouseup', e => {
   const y = (e.clientY - rect.top) / rect.height * SIZE;
   if (game && game.state === 'playing') {
     game.eggSplash();
+    game.egg.target = null;
   } else if (game) {
     game.handleClick(x, y);
   }
