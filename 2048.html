@@ -12,7 +12,7 @@
 .dpad-btn.empty { background: transparent; pointer-events: none; }
 @media (min-width: 520px) { .dpad { display: none; } }
 * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
-body { background: #faf8ef; font-family: Arial, sans-serif; display: flex; justify-content: center; padding-top: 40px; }
+body { background: #faf8ef; font-family: Arial, sans-serif; display: flex; justify-content: center; padding-top: 40px; touch-action: none; }
 .container { width: 500px; max-width: 94vw; }
 .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
 h1 { font-size: 64px; font-weight: bold; color: #776e65; }
@@ -145,7 +145,8 @@ document.addEventListener('mouseup', e => {
 });
 
 let touchX, touchY;
-document.addEventListener('touchstart', e => { touchX = e.touches[0].clientX; touchY = e.touches[0].clientY; });
+document.addEventListener('touchstart', e => { e.preventDefault(); touchX = e.touches[0].clientX; touchY = e.touches[0].clientY; });
+document.addEventListener('touchmove', e => { e.preventDefault(); });
 document.addEventListener('touchend', e => {
   const dx = e.changedTouches[0].clientX - touchX, dy = e.changedTouches[0].clientY - touchY;
   const absX = Math.abs(dx), absY = Math.abs(dy);
