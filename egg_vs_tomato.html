@@ -6,21 +6,50 @@
 <title>蛋蛋快跑 - 番茄大追杀</title>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; -webkit-touch-callout: none; }
-body { background: #e8f5e9; display: flex; justify-content: center; align-items: center; min-height: 100dvh; font-family: Arial, sans-serif; overflow: hidden; touch-action: none; }
+body { background: #e8f5e9; display: flex; justify-content: center; align-items: center; height: 100dvh; font-family: Arial, sans-serif; overflow: auto; touch-action: none; }
 canvas { display: block; border-radius: 12px; box-shadow: 0 0 40px rgba(0,0,0,.5); touch-action: none; }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 <script>
-const SIZE = Math.min(window.innerWidth, window.innerHeight, 480);
-const CX = SIZE / 2, CY = SIZE / 2;
+let CW, CH, SIZE, UI_SIZE, CX, CY;
+let PLATE_R, BOUNDARY_MODE, PLATE_MARGIN, EGG_R;
+let BASE_W, BASE_H;
 const canvas = document.getElementById('c');
-canvas.width = canvas.height = SIZE;
 const ctx = canvas.getContext('2d');
-
-const PLATE_R = SIZE * .38;
-const EGG_R = SIZE * .045;
+function resizeCanvas(mode) {
+  const availW = window.innerWidth - 32;
+  const availH = window.innerHeight - 32;
+  const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+  if (isTouch) {
+    CW = availW;
+    CH = availH;
+  } else {
+    if (!BASE_W) { BASE_W = availW; BASE_H = availH; }
+    CW = BASE_W;
+    CH = BASE_H;
+  }
+  SIZE = Math.min(CW, CH);
+  UI_SIZE = Math.min(SIZE, 480);
+  CX = CW / 2;
+  CY = CH / 2;
+  PLATE_MARGIN = Math.max(SIZE * .03, 8);
+  EGG_R = SIZE * .045;
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  canvas.width = CW * dpr;
+  canvas.height = CH * dpr;
+  if (isTouch) {
+    canvas.style.width = CW + 'px';
+    canvas.style.height = CH + 'px';
+  } else {
+    const scale = Math.min(1, availW / CW, availH / CH);
+    canvas.style.width = Math.floor(CW * scale) + 'px';
+    canvas.style.height = Math.floor(CH * scale) + 'px';
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+resizeCanvas('hard');
 
 let game = null;
 let touchId = null;
@@ -75,6 +104,8 @@ class Egg {
     this.maxHp = 3;
     this.invincible = 0;
     this.target = null;
+    this.splashRangeBuff = 0;
+    this.splashPowerBuff = 0;
   }
 
   getSkinColor() {
@@ -84,7 +115,7 @@ class Egg {
 
   draw() {
     const [base, shadow] = this.getSkinColor();
-    ctx.shadowColor = 'rgba(0,0,0,.3)';
+    ctx.shadowColor = 'rgba(0,0,0,.15)';
     ctx.shadowBlur = 8;
     ctx.beginPath();
     ctx.ellipse(this.pos.x, this.pos.y, this.r * 1.05, this.r * 1.1, 0, 0, Math.PI * 2);
@@ -95,6 +126,21 @@ class Egg {
     ctx.ellipse(this.pos.x, this.pos.y - this.r * .05, this.r, this.r * 1.05, 0, 0, Math.PI * 2);
     ctx.fillStyle = base;
     ctx.fill();
+    // 3D shading
+    const grad = ctx.createRadialGradient(
+      this.pos.x - this.r * .25, this.pos.y - this.r * .3, 0,
+      this.pos.x, this.pos.y, this.r * 1.0);
+    grad.addColorStop(0, 'rgba(255,255,255,.2)');
+    grad.addColorStop(.4, 'rgba(255,255,255,0)');
+    grad.addColorStop(.7, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, 'rgba(0,0,0,.1)');
+    ctx.fillStyle = grad;
+    ctx.fill();
+    // Glossy highlight
+    ctx.beginPath();
+    ctx.ellipse(this.pos.x - this.r * .25, this.pos.y - this.r * .4, this.r * .2, this.r * .09, -0.3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,.35)';
+    ctx.fill();
     if (this.skin === '煎荷包蛋') {
       ctx.beginPath();
       ctx.arc(this.pos.x, this.pos.y + this.r * .05, this.r * .55, 0, Math.PI * 2);
@@ -104,24 +150,58 @@ class Egg {
       ctx.arc(this.pos.x, this.pos.y + this.r * .05, this.r * .45, 0, Math.PI * 2);
       ctx.fillStyle = '#ff8f00';
       ctx.fill();
-      ctx.fillStyle = '#333';
+    } else if (this.skin === '溏心蛋') {
+      // Yolk drips
+      ctx.fillStyle = '#ffb300';
       ctx.beginPath();
-      ctx.arc(this.pos.x - this.r * .25, this.pos.y + this.r * .05, this.r * .1, 0, Math.PI * 2);
-      ctx.arc(this.pos.x + this.r * .25, this.pos.y + this.r * .05, this.r * .1, 0, Math.PI * 2);
+      ctx.arc(this.pos.x, this.pos.y + this.r * .02, this.r * .4, 0, Math.PI * 2);
       ctx.fill();
-    } else {
-      ctx.fillStyle = '#333';
+      ctx.fillStyle = '#ff8f00';
       ctx.beginPath();
-      ctx.arc(this.pos.x - this.r * .3, this.pos.y - this.r * .15, this.r * .12, 0, Math.PI * 2);
-      ctx.arc(this.pos.x + this.r * .3, this.pos.y - this.r * .15, this.r * .12, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#f80';
-      ctx.beginPath();
-      ctx.moveTo(this.pos.x - this.r * .05, this.pos.y - this.r * .05);
-      ctx.lineTo(this.pos.x + this.r * .05, this.pos.y - this.r * .05);
-      ctx.lineTo(this.pos.x, this.pos.y + this.r * .05);
+      ctx.arc(this.pos.x, this.pos.y + this.r * .02, this.r * .3, 0, Math.PI * 2);
       ctx.fill();
     }
+    // Eyes (white + pupil)
+    const eyeY = this.pos.y - this.r * .12;
+    const eyeSep = this.r * .28;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.ellipse(this.pos.x - eyeSep, eyeY, this.r * .15, this.r * .18, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(this.pos.x + eyeSep, eyeY, this.r * .15, this.r * .18, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Pupils
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.arc(this.pos.x - eyeSep, eyeY, this.r * .09, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(this.pos.x + eyeSep, eyeY, this.r * .09, 0, Math.PI * 2);
+    ctx.fill();
+    // Eye shine
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(this.pos.x - eyeSep - this.r * .03, eyeY - this.r * .04, this.r * .035, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(this.pos.x + eyeSep - this.r * .03, eyeY - this.r * .04, this.r * .035, 0, Math.PI * 2);
+    ctx.fill();
+    // Blush
+    ctx.fillStyle = 'rgba(255,140,140,.25)';
+    ctx.beginPath();
+    ctx.ellipse(this.pos.x - this.r * .36, this.pos.y + this.r * .08, this.r * .14, this.r * .09, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(this.pos.x + this.r * .36, this.pos.y + this.r * .08, this.r * .14, this.r * .09, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Cute mouth
+    ctx.fillStyle = '#e07040';
+    ctx.beginPath();
+    ctx.moveTo(this.pos.x - this.r * .08, this.pos.y + this.r * .14);
+    ctx.quadraticCurveTo(this.pos.x, this.pos.y + this.r * .22, this.pos.x + this.r * .08, this.pos.y + this.r * .14);
+    ctx.lineTo(this.pos.x - this.r * .08, this.pos.y + this.r * .14);
+    ctx.fill();
     if (this.slipping > 0) {
       ctx.strokeStyle = '#ff0';
       ctx.lineWidth = 2;
@@ -158,22 +238,38 @@ class Egg {
         this.target = null;
       }
     }
-    const toCenter = this.pos.sub(new Vec2(CX, CY));
-    if (toCenter.len() > PLATE_R - this.r) {
-      this.pos = new Vec2(CX, CY).add(toCenter.norm().scale(PLATE_R - this.r));
-      this.vel = new Vec2();
+    if (BOUNDARY_MODE === 'circle') {
+      const toCenter = this.pos.sub(new Vec2(CX, CY));
+      if (toCenter.len() > PLATE_R - this.r) {
+        this.pos = new Vec2(CX, CY).add(toCenter.norm().scale(PLATE_R - this.r));
+        this.vel = new Vec2();
+      }
+    } else {
+      const cx = Math.max(this.r + PLATE_MARGIN, Math.min(CW - PLATE_MARGIN - this.r, this.pos.x));
+      const cy = Math.max(this.r + PLATE_MARGIN, Math.min(CH - PLATE_MARGIN - this.r, this.pos.y));
+      if (cx !== this.pos.x || cy !== this.pos.y) {
+        this.pos = new Vec2(cx, cy);
+        this.vel = new Vec2();
+      }
     }
     if (this.slipping > 0) this.slipping--;
     if (this.invincible > 0) this.invincible--;
     if (this.comboTimer > 0) this.comboTimer--;
     else this.combo = 0;
+    if (this.splashRangeBuff > 0) this.splashRangeBuff--;
+    if (this.splashPowerBuff > 0) this.splashPowerBuff--;
   }
 
   moveTo(tx, ty) {
     let target = new Vec2(tx, ty);
-    const toCenter = target.sub(new Vec2(CX, CY));
-    if (toCenter.len() > PLATE_R - this.r) {
-      target = new Vec2(CX, CY).add(toCenter.norm().scale(PLATE_R - this.r));
+    if (BOUNDARY_MODE === 'circle') {
+      const toCenter = target.sub(new Vec2(CX, CY));
+      if (toCenter.len() > PLATE_R - this.r) {
+        target = new Vec2(CX, CY).add(toCenter.norm().scale(PLATE_R - this.r));
+      }
+    } else {
+      target.x = Math.max(this.r + PLATE_MARGIN, Math.min(CW - PLATE_MARGIN - this.r, target.x));
+      target.y = Math.max(this.r + PLATE_MARGIN, Math.min(CH - PLATE_MARGIN - this.r, target.y));
     }
     this.target = target;
     const diff = this.target.sub(this.pos);
@@ -202,8 +298,18 @@ class Tomato {
       this.maxHp = this.hp;
       this.speed = type === 'boss' ? .8 : type === 'big' ? .7 : type === 'seed' ? 1.5 : .6 + Math.random() * .4;
       const angle = Math.random() * Math.PI * 2;
-      const dist = PLATE_R + this.r + 10 + Math.random() * 30;
-      this.pos = new Vec2(CX + Math.cos(angle) * dist, CY + Math.sin(angle) * dist);
+      if (BOUNDARY_MODE === 'rect') {
+        const side = Math.floor(Math.random() * 4);
+        const spanX = CW - PLATE_MARGIN * 2;
+        const spanY = CH - PLATE_MARGIN * 2;
+        if (side === 0) this.pos = new Vec2(CX - spanX / 2 + Math.random() * spanX, -this.r - 10 - Math.random() * 40);
+        else if (side === 1) this.pos = new Vec2(CW + this.r + 10 + Math.random() * 40, CY - spanY / 2 + Math.random() * spanY);
+        else if (side === 2) this.pos = new Vec2(CX - spanX / 2 + Math.random() * spanX, CH + this.r + 10 + Math.random() * 40);
+        else this.pos = new Vec2(-this.r - 10 - Math.random() * 40, CY - spanY / 2 + Math.random() * spanY);
+      } else {
+        const dist = PLATE_R + this.r + 10 + Math.random() * 30;
+        this.pos = new Vec2(CX + Math.cos(angle) * dist, CY + Math.sin(angle) * dist);
+      }
     }
     this.target = new Vec2(CX, CY);
     this.vel = new Vec2(0, 0);
@@ -223,23 +329,80 @@ class Tomato {
     const c = this.type === 'boss' ? '#e63946' : this.type === 'big' ? '#f44336' : isShield ? '#4fc3f7' : isSplitter ? '#ab47bc' : isExplosive ? '#ff7043' : isSeed ? '#ffab91' : '#ff6b6b';
     const c2 = this.type === 'boss' ? '#c1121f' : this.type === 'big' ? '#d32f2f' : isShield ? '#0288d1' : isSplitter ? '#7b1fa2' : isExplosive ? '#d84315' : isSeed ? '#ff6e40' : '#ee5a24';
     ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,.3)';
+    ctx.shadowColor = 'rgba(0,0,0,.15)';
     ctx.shadowBlur = 6;
     ctx.beginPath();
     ctx.arc(this.pos.x, this.pos.y, this.r, 0, Math.PI * 2);
     ctx.fillStyle = c;
     ctx.fill();
     ctx.shadowBlur = 0;
+    // 3D shading
+    const grad2 = ctx.createRadialGradient(
+      this.pos.x - this.r * .25, this.pos.y - this.r * .3, 0,
+      this.pos.x, this.pos.y, this.r * 1.0);
+    grad2.addColorStop(0, 'rgba(255,255,255,.2)');
+    grad2.addColorStop(.4, 'rgba(255,255,255,0)');
+    grad2.addColorStop(.7, 'rgba(0,0,0,0)');
+    grad2.addColorStop(1, 'rgba(0,0,0,.1)');
+    ctx.fillStyle = grad2;
+    ctx.fill();
+    // Glossy highlight
     ctx.beginPath();
-    ctx.arc(this.pos.x - this.r * .2, this.pos.y - this.r * .2, this.r * .5, 0, Math.PI * 2);
-    ctx.fillStyle = c2;
+    ctx.ellipse(this.pos.x - this.r * .25, this.pos.y - this.r * .38, this.r * .22, this.r * .1, -0.4, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,.3)';
     ctx.fill();
     if (!isSeed) {
+      // Stem
+      ctx.fillStyle = '#388e3c';
       ctx.beginPath();
-      ctx.arc(this.pos.x - this.r * .1, this.pos.y - this.r * .3, this.r * .15, 0, Math.PI * 2);
-      ctx.fillStyle = '#2d6a4f';
+      ctx.ellipse(this.pos.x, this.pos.y - this.r * .85, this.r * .12, this.r * .18, 0, 0, Math.PI * 2);
+      ctx.fill();
+      // Leaf
+      ctx.fillStyle = '#43a047';
+      ctx.beginPath();
+      ctx.ellipse(this.pos.x - this.r * .15, this.pos.y - this.r * .82, this.r * .2, this.r * .08, -0.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(this.pos.x + this.r * .15, this.pos.y - this.r * .82, this.r * .2, this.r * .08, 0.5, 0, Math.PI * 2);
       ctx.fill();
     }
+    // Cute face
+    const eyeY = this.pos.y - this.r * .1;
+    const eyeSep = this.r * .28;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.ellipse(this.pos.x - eyeSep, eyeY, this.r * .16, this.r * .19, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(this.pos.x + eyeSep, eyeY, this.r * .16, this.r * .19, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.arc(this.pos.x - eyeSep, eyeY, this.r * .1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(this.pos.x + eyeSep, eyeY, this.r * .1, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(this.pos.x - eyeSep - this.r * .03, eyeY - this.r * .04, this.r * .04, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(this.pos.x + eyeSep - this.r * .03, eyeY - this.r * .04, this.r * .04, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,120,120,.2)';
+    ctx.beginPath();
+    ctx.ellipse(this.pos.x - this.r * .38, this.pos.y + this.r * .1, this.r * .15, this.r * .1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(this.pos.x + this.r * .38, this.pos.y + this.r * .1, this.r * .15, this.r * .1, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Mischievous smile
+    ctx.strokeStyle = this.type === 'shield' ? '#0277bd' : '#c62828';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(this.pos.x, this.pos.y + this.r * .18, this.r * .12, 0.1, Math.PI - 0.1);
+    ctx.stroke();
     if (this.hp < this.maxHp) {
       const bw = this.r * 1.2;
       ctx.fillStyle = '#333';
@@ -344,15 +507,33 @@ class Tomato {
 }
 
 const ACHIEVEMENTS = [
-  { id: 'first_game', name: '初出茅庐', desc: '完成第一局游戏', icon: '🎮', check: g => g.totalGamesPlayed >= 1 },
-  { id: 'no_splash', name: '心如止水', desc: '不释放 splash 存活 30 秒', icon: '🧘', check: g => g.bestNoSplashTime >= 30 },
-  { id: 'combo_50', name: '弹指神通', desc: '单局打出 50 连击', icon: '👆', check: g => g.maxCombo >= 50 },
-  { id: 'survivor_10min', name: '老油条', desc: '累计存活 10 分钟', icon: '⏳', check: g => g.totalSurvivalTime >= 600 },
-  { id: 'kill_500', name: '番茄杀手', desc: '累计击杀 500 个番茄', icon: '🍅', check: g => g.totalKills >= 500 },
-  { id: 'max_skin', name: '满级玩家', desc: '解锁溏心蛋皮肤', icon: '👑', check: g => g.unlockedSkins.includes('溏心蛋') },
-  { id: 'iron_wall', name: '铁壁', desc: '单局无伤存活 60 秒', icon: '🛡️', check: g => g.bestPerfectTime >= 60 },
-  { id: 'ten_games', name: '老玩家', desc: '累计游戏 10 局', icon: '🎯', check: g => g.totalGamesPlayed >= 10 },
+  { id: 'first_game', name: '初出茅庐', desc: '完成第一局游戏', icon: '🐣', check: g => g.totalGamesPlayed >= 1 },
+  { id: 'no_splash', name: '心如止水', desc: '不释放 splash 存活 30 秒', icon: '🪷', check: g => g.bestNoSplashTime >= 30 },
+  { id: 'combo_50', name: '弹指神通', desc: '单局打出 50 连击', icon: '💫', check: g => g.maxCombo >= 50 },
+  { id: 'survivor_10min', name: '老油条', desc: '累计存活 10 分钟', icon: '🏆', check: g => g.totalSurvivalTime >= 600 },
+  { id: 'kill_500', name: '番茄杀手', desc: '累计击杀 500 个番茄', icon: '🥷', check: g => g.totalKills >= 500 },
+  { id: 'max_skin', name: '满级玩家', desc: '解锁溏心蛋皮肤', icon: '🌟', check: g => g.unlockedSkins.includes('溏心蛋') },
+  { id: 'iron_wall', name: '铁壁', desc: '单局无伤存活 60 秒', icon: '🧱', check: g => g.bestPerfectTime >= 60 },
+  { id: 'ten_games', name: '老玩家', desc: '累计游戏 10 局', icon: '🎮', check: g => g.totalGamesPlayed >= 10 },
 ];
+
+const ARTIFACT_TYPES = [
+  { id: 'heal', icon: '❤️', label: '回血' },
+  { id: 'splash_range', icon: '💫', label: '蛋液蔓延' },
+  { id: 'splash_power', icon: '⚡', label: '蛋液增幅' },
+];
+
+function getSurvivalTag(secs) {
+  if (secs < 5) return '😵 开局就躺，番茄都没反应过来';
+  if (secs < 10) return '😅 这波不亏，下次一定！';
+  if (secs < 20) return '🤔 刚热身就被抬走了...';
+  if (secs < 30) return '😤 开始有感觉了！再来！';
+  if (secs < 45) return '😎 稳住了！番茄不过如此嘛';
+  if (secs < 60) return '🔥 渐入佳境，汤都快煮好了！';
+  if (secs < 90) return '⚡ 老蛋出动！番茄们闻风丧胆';
+  if (secs < 120) return '🌟 温泉蛋大师！满级操作！';
+  return '👑 蛋蛋之神！番茄界传奇！';
+}
 
 class Game {
   constructor() {
@@ -382,18 +563,28 @@ class Game {
     this.message = '';
     this.messageTimer = 0;
     this.splashCooldown = 0;
+    this.artifacts = [];
+    this.artifactTimer = 200;
     this.lastTime = performance.now();
     this.bonusHp = 0;
+    this.mode = 'hard';
     this.loadProgress();
+    this.updatePlateR();
     this.currentSkin = this.skinPoints >= 5000 ? '溏心蛋' : this.skinPoints >= 1000 ? '煎荷包蛋' : this.skinPoints >= 100 ? '茶叶蛋' : 'normal';
   }
 
+  updatePlateR() {
+    resizeCanvas(this.mode);
+    PLATE_R = SIZE * .45;
+    BOUNDARY_MODE = this.mode === 'normal' ? 'rect' : 'circle';
+  }
+
   getSpawnInterval() {
-    return Math.max(35, 120 - this.difficulty * 2);
+    return Math.max(40, Math.floor(80 - this.difficulty * 1.5));
   }
 
   getTomatoSpeedMult() {
-    return 1 + this.difficulty * 0.03;
+    return (1 + this.difficulty * 0.03) * (SIZE / 400);
   }
 
   getTomatoCap() {
@@ -415,6 +606,7 @@ class Game {
       this.bestNoSplashTime = d.bestNoSplashTime || 0;
       this.bestPerfectTime = d.bestPerfectTime || 0;
       this.bonusHp = (this.achievements.includes('iron_wall') ? 1 : 0) + (this.achievements.includes('ten_games') ? 1 : 0) + (this.achievements.includes('max_skin') ? 1 : 0);
+      this.mode = d.mode || 'hard';
     } catch(e) {}
   }
 
@@ -432,7 +624,8 @@ class Game {
         totalGamesPlayed: this.totalGamesPlayed,
         bestNoSplashTime: this.bestNoSplashTime,
         bestPerfectTime: this.bestPerfectTime,
-        bonusHp: this.bonusHp
+        bonusHp: this.bonusHp,
+        mode: this.mode
       }));
     } catch(e) {}
   }
@@ -460,6 +653,8 @@ class Game {
     this.splashUsedThisRound = false;
     this.perfectRoundThisRound = true;
     this.state = 'playing';
+    this.artifacts = [];
+    this.artifactTimer = 300 + Math.floor(Math.random() * 200);
   }
 
   spawnEnemy() {
@@ -472,6 +667,7 @@ class Game {
     else if (this.difficulty >= 3 && Math.random() < .15) type = 'big';
     const t = new Tomato(type);
     t.speed *= this.getTomatoSpeedMult();
+    t.life = Math.floor(t.life * (SIZE / 400));
     this.tomatoes.push(t);
   }
 
@@ -479,7 +675,7 @@ class Game {
     if (this.splashCooldown > 0) return;
     this.splashCooldown = 12;
     this.splashUsedThisRound = true;
-    const range = PLATE_R * .5;
+    const range = PLATE_R * .5 * (this.egg.splashRangeBuff > 0 ? 1.5 : 1);
     for (let i = 0; i < 40; i++) {
       const a = Math.PI * 2 / 40 * i + Math.random() * .15;
       const speed = 4 + Math.random() * 4;
@@ -497,7 +693,7 @@ class Game {
           t.shielded = false;
           t.flash = 20;
         } else {
-          t.hp -= Math.ceil(1 + power * 2);
+          t.hp -= Math.ceil((1 + power * 2) * (this.egg.splashPowerBuff > 0 ? 1.5 : 1));
         }
         if (t.hp <= 0) {
           if (t.type === 'splitter') {
@@ -597,6 +793,64 @@ class Game {
     this.messageTimer = time || 60;
   }
 
+  spawnArtifact() {
+    const healWeight = this.egg.hp < this.egg.maxHp ? Math.min(10, (this.egg.maxHp - this.egg.hp) * 5) : 0;
+    const types = [
+      { id: 'heal', icon: '❤️', label: '回血', weight: healWeight },
+      { id: 'splash_range', icon: '💫', label: '蛋液蔓延', weight: 2 },
+      { id: 'splash_power', icon: '⚡', label: '蛋液增幅', weight: 2 },
+    ];
+    const totalWeight = types.reduce((s, t) => s + t.weight, 0);
+    if (totalWeight <= 0) return;
+    let r = Math.random() * totalWeight;
+    let chosen = types[0];
+    for (const t of types) {
+      r -= t.weight;
+      if (r <= 0) { chosen = t; break; }
+    }
+    const margin = EGG_R * 3;
+    // Pick position farthest from nearest tomato
+    const candidates = 16;
+    let bestX, bestY, bestDist = -1;
+    for (let c = 0; c < candidates; c++) {
+      let px, py;
+      if (BOUNDARY_MODE === 'circle') {
+        const angle = Math.random() * Math.PI * 2;
+        const dist = margin + Math.random() * Math.max(0, PLATE_R - margin - EGG_R);
+        px = CX + Math.cos(angle) * dist;
+        py = CY + Math.sin(angle) * dist;
+      } else {
+        px = PLATE_MARGIN + margin + Math.random() * Math.max(0, CW - PLATE_MARGIN * 2 - margin * 2);
+        py = PLATE_MARGIN + margin + Math.random() * Math.max(0, CH - PLATE_MARGIN * 2 - margin * 2);
+      }
+      let minDist = 1e9;
+      for (const t of this.tomatoes) {
+        const d = Math.hypot(t.pos.x - px, t.pos.y - py);
+        if (d < minDist) minDist = d;
+      }
+      if (minDist > bestDist) { bestDist = minDist; bestX = px; bestY = py; }
+    }
+    this.artifacts.push({ x: bestX, y: bestY, type: chosen, r: EGG_R * .8, phase: Math.random() * Math.PI * 2, life: 600 });
+  }
+
+  collectArtifact(a) {
+    if (a.type.id === 'heal') {
+      this.egg.hp = Math.min(this.egg.hp + 1, this.egg.maxHp);
+      this.showMessage('❤️ 回血 +1', 40);
+    } else if (a.type.id === 'splash_range') {
+      this.egg.splashRangeBuff = 360;
+      this.showMessage('💫 蛋液蔓延！', 40);
+    } else if (a.type.id === 'splash_power') {
+      this.egg.splashPowerBuff = 360;
+      this.showMessage('⚡ 蛋液增幅！', 40);
+    }
+    for (let i = 0; i < 12; i++) {
+      const a2 = Math.random() * Math.PI * 2;
+      const speed = 2 + Math.random() * 3;
+      this.particles.push(new Particle(a.x, a.y, Math.cos(a2) * speed, Math.sin(a2) * speed, 3, '#ffd700', 20));
+    }
+  }
+
   checkUnlocks() {
     const prev = this.currentSkin;
     if (this.skinPoints >= 5000) this.currentSkin = '溏心蛋';
@@ -632,7 +886,7 @@ class Game {
 
     // Survival time and difficulty scaling
     this.survivalTime += dt / 60;
-    this.difficulty = this.survivalTime * 0.25;
+    this.difficulty = this.survivalTime * (this.mode === 'normal' ? 0.12 : 0.18);
 
     this.egg.update(dt);
 
@@ -702,58 +956,125 @@ class Game {
       if (this.particles[i].life <= 0) this.particles.splice(i, 1);
     }
 
+    // Artifact spawn
+    if (this.artifacts.length === 0) {
+      this.artifactTimer--;
+      if (this.artifactTimer <= 0) {
+        this.spawnArtifact();
+      }
+    }
+    // Artifact collection & lifetime
+    for (let i = this.artifacts.length - 1; i >= 0; i--) {
+      const a = this.artifacts[i];
+      a.life--;
+      if (a.life <= 0) {
+        this.artifacts.splice(i, 1);
+        this.artifactTimer = 300 + Math.floor(Math.random() * 200);
+        continue;
+      }
+      const d = Math.hypot(a.x - this.egg.pos.x, a.y - this.egg.pos.y);
+      if (d < a.r + this.egg.r) {
+        this.collectArtifact(a);
+        this.artifacts.splice(i, 1);
+        this.artifactTimer = 300 + Math.floor(Math.random() * 200);
+      }
+    }
+
     if (this.nearMissTimer > 0) this.nearMissTimer--;
   }
 
   draw() {
-    ctx.clearRect(0, 0, SIZE, SIZE);
+    ctx.clearRect(0, 0, CW, CH);
     if (this.state === 'menu') { this.drawMenu(); return; }
     if (this.state === 'gameover') { this.drawGameOver(); return; }
 
     ctx.fillStyle = '#f0faf5';
-    ctx.fillRect(0, 0, SIZE, SIZE);
+    ctx.fillRect(0, 0, CW, CH);
 
     ctx.shadowColor = 'rgba(0,0,0,.1)';
     ctx.shadowBlur = 15;
-    ctx.beginPath();
-    ctx.arc(CX, CY, PLATE_R, 0, Math.PI * 2);
-    ctx.fillStyle = '#fafffe';
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.beginPath();
-    ctx.arc(CX, CY, PLATE_R, 0, Math.PI * 2);
-    ctx.strokeStyle = '#c8e6c9';
-    ctx.lineWidth = 3;
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(CX, CY, PLATE_R * .85, 0, Math.PI * 2);
-    ctx.strokeStyle = '#e8f5e9';
-    ctx.lineWidth = 1;
-    ctx.stroke();
+    if (BOUNDARY_MODE === 'rect') {
+      const pw = CW - PLATE_MARGIN * 2, ph = CH - PLATE_MARGIN * 2;
+      ctx.beginPath();
+      ctx.roundRect(PLATE_MARGIN, PLATE_MARGIN, pw, ph, 14);
+      ctx.fillStyle = '#fafffe';
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      ctx.roundRect(PLATE_MARGIN, PLATE_MARGIN, pw, ph, 14);
+      ctx.strokeStyle = '#c8e6c9';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.roundRect(PLATE_MARGIN + 6, PLATE_MARGIN + 6, pw - 12, ph - 12, 10);
+      ctx.strokeStyle = '#e8f5e9';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    } else {
+      ctx.beginPath();
+      ctx.arc(CX, CY, PLATE_R, 0, Math.PI * 2);
+      ctx.fillStyle = '#fafffe';
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.beginPath();
+      ctx.arc(CX, CY, PLATE_R, 0, Math.PI * 2);
+      ctx.strokeStyle = '#c8e6c9';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(CX, CY, PLATE_R * .85, 0, Math.PI * 2);
+      ctx.strokeStyle = '#e8f5e9';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
 
     // Combo visual effects
     if (this.comboCount >= 5) {
       const intensity = Math.min(1, this.comboCount / 20);
       ctx.fillStyle = `rgba(255, 255, 200, ${intensity * .04})`;
-      ctx.fillRect(0, 0, SIZE, SIZE);
+      ctx.fillRect(0, 0, CW, CH);
       ctx.strokeStyle = `rgba(255, 200, 0, ${intensity * .3})`;
       ctx.lineWidth = 1;
+      const comboR = BOUNDARY_MODE === 'rect' ? SIZE * .4 : PLATE_R;
       ctx.beginPath();
-      ctx.arc(CX, CY, PLATE_R * (.6 + Math.sin(Date.now() / 200) * .1 * intensity), 0, Math.PI * 2);
+      ctx.arc(CX, CY, comboR * (.6 + Math.sin(Date.now() / 200) * .1 * intensity), 0, Math.PI * 2);
       ctx.stroke();
       ctx.beginPath();
-      ctx.arc(CX, CY, PLATE_R * (.4 + Math.cos(Date.now() / 250) * .1 * intensity), 0, Math.PI * 2);
+      ctx.arc(CX, CY, comboR * (.4 + Math.cos(Date.now() / 250) * .1 * intensity), 0, Math.PI * 2);
       ctx.stroke();
     }
 
     if (this.nearMissTimer > 20) {
       ctx.fillStyle = `rgba(255, 255, 255, ${(this.nearMissTimer - 20) / 40})`;
-      ctx.fillRect(0, 0, SIZE, SIZE);
+      ctx.fillRect(0, 0, CW, CH);
     }
 
     for (let t of this.tomatoes) t.draw();
     this.egg.draw();
     for (let p of this.particles) p.draw();
+    for (const a of this.artifacts) {
+      const bob = Math.sin(Date.now() / 200 + a.phase) * 3;
+      const ay = a.y + bob;
+      ctx.save();
+      ctx.shadowColor = 'rgba(255,215,0,.6)';
+      ctx.shadowBlur = 20;
+      ctx.fillStyle = '#fff8e1';
+      ctx.beginPath();
+      ctx.arc(a.x, ay, a.r + 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(255,215,0,.5)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(a.x, ay, a.r + 4, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+      ctx.font = `${a.r * 1.4}px Arial`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(a.type.icon, a.x, ay);
+      ctx.textBaseline = 'alphabetic';
+    }
 
     ctx.fillStyle = '#4a7c59';
     ctx.font = `bold ${SIZE * .05}px Arial`;
@@ -769,10 +1090,10 @@ class Game {
     ctx.font = `${SIZE * .035}px Arial`;
     ctx.textAlign = 'right';
     const skinLabel = { normal: '普通蛋', 茶叶蛋: '茶叶蛋', 煎荷包蛋: '煎荷包蛋', 溏心蛋: '溏心蛋' };
-    ctx.fillText(skinLabel[this.egg.skin] || '普通蛋', SIZE * .96, SIZE * .06);
-    ctx.fillText(`积分: ${this.skinPoints}`, SIZE * .96, SIZE *.11);
+    ctx.fillText(skinLabel[this.egg.skin] || '普通蛋', CW - SIZE * .04, SIZE * .08);
+    ctx.fillText(`积分: ${this.skinPoints}`, CW - SIZE * .04, SIZE *.13);
     const hpW = SIZE * .18, hpH = 8;
-    const hpX = SIZE * .04, hpY = SIZE * .20;
+    const hpX = SIZE * .04, hpY = SIZE * .22;
     ctx.fillStyle = '#c8e6c9';
     ctx.fillRect(hpX, hpY, hpW, hpH);
     ctx.fillStyle = this.egg.hp / this.egg.maxHp > .3 ? '#81c784' : '#ef9a9a';
@@ -781,20 +1102,35 @@ class Game {
     ctx.font = `${SIZE * .028}px Arial`;
     ctx.textAlign = 'left';
     ctx.fillText(`❤ ${this.egg.hp}/${this.egg.maxHp}`, hpX, hpY - 3);
+    if (this.egg.splashRangeBuff > 0 || this.egg.splashPowerBuff > 0) {
+      ctx.font = `${SIZE * .02}px Arial`;
+      ctx.textAlign = 'left';
+      let buffY = hpY + hpH + SIZE * .025;
+      if (this.egg.splashRangeBuff > 0) {
+        ctx.fillStyle = '#81d4fa';
+        ctx.fillText('💫 蛋液蔓延', hpX, buffY);
+        buffY += SIZE * .025;
+      }
+      if (this.egg.splashPowerBuff > 0) {
+        ctx.fillStyle = '#ffd54f';
+        ctx.fillText('⚡ 蛋液增幅', hpX, buffY);
+      }
+    }
 
-    // Difficulty indicator
+    // Mode & difficulty indicator
     ctx.fillStyle = '#8aa899';
     ctx.font = `${SIZE * .025}px Arial`;
     ctx.textAlign = 'center';
+    const modeLabel = this.mode === 'normal' ? '温泉' : '地狱';
     const diffStars = this.difficulty < 3 ? '★☆☆' : this.difficulty < 6 ? '★★☆' : this.difficulty < 10 ? '★★★' : '★★★★';
-    ctx.fillText(`难度 ${diffStars}`, CX, SIZE * .04);
+    ctx.fillText(`${modeLabel} · ${diffStars}`, CX, SIZE * .04);
 
     if (this.messageTimer > 0) {
       ctx.fillStyle = '#ff8a65';
       ctx.font = `bold ${SIZE * .07}px Arial`;
       ctx.textAlign = 'center';
       ctx.globalAlpha = Math.min(1, this.messageTimer / 20);
-      ctx.fillText(this.message, CX, CY - PLATE_R * .6);
+      ctx.fillText(this.message, CX, SIZE * .25);
       ctx.globalAlpha = 1;
     }
 
@@ -819,7 +1155,8 @@ class Game {
 
   drawMenu() {
     ctx.fillStyle = '#f0faf0';
-    ctx.fillRect(0, 0, SIZE, SIZE);
+    ctx.fillRect(0, 0, CW, CH);
+    const V = Math.max(SIZE, CH * .7);
     const skinLabel = { normal: '普通蛋', 茶叶蛋: '茶叶蛋', 煎荷包蛋: '煎荷包蛋', 溏心蛋: '溏心蛋' };
     const skinOrder = ['normal', '茶叶蛋', '煎荷包蛋', '溏心蛋'];
     const idx = skinOrder.indexOf(this.currentSkin);
@@ -832,27 +1169,27 @@ class Game {
     ctx.fillStyle = '#4a7c59';
     ctx.font = `bold ${SIZE * .09}px Arial`;
     ctx.textAlign = 'center';
-    ctx.fillText('🥚 蛋蛋快跑', CX, CY - SIZE * .31);
+    ctx.fillText('🥚 蛋蛋快跑', CX, CY - V * .31);
     ctx.font = `${SIZE * .035}px Arial`;
     ctx.fillStyle = '#8aa899';
-    ctx.fillText('拖动蛋蛋躲避 · 松手蛋液击退番茄', CX, CY - SIZE * .24);
-    ctx.fillText('在番茄围攻中活下来！越久越好！', CX, CY - SIZE * .19);
-    this.drawSkinPreview(CX, CY - SIZE * .08, SIZE * .055, this.currentSkin);
+    ctx.fillText('🍅 番茄大军杀到！拖走蛋蛋躲追击，松手就是蛋液炸弹！', CX, CY - V * .24);
+    ctx.fillText('✨ 苟得越久分越高，神秘法宝助你回血/蔓延/增幅！', CX, CY - V * .19);
+    this.drawSkinPreview(CX, CY - V * .08, SIZE * .055, this.currentSkin);
     // Skin name + HP simplified
     const showMaxHp = this.getMaxHp();
     ctx.fillStyle = '#5a8a69';
     ctx.font = `bold ${SIZE * .042}px Arial`;
-    ctx.fillText(`🏆 ${skinLabel[this.currentSkin] || '普通蛋'}  ❤${showMaxHp}`, CX, CY + SIZE * .07);
+    ctx.fillText(`🏆 ${skinLabel[this.currentSkin] || '普通蛋'}  ❤${showMaxHp}`, CX, CY + V * .07);
     // Progress bar
-    const barW = SIZE * .30, barH = 5, barX = CX - barW / 2, barY = CY + SIZE * .12;
+    const barW = SIZE * .30, barH = 5, barX = CX - barW / 2, barY = CY + V * .12;
     if (this.currentSkin === '溏心蛋') {
       ctx.fillStyle = '#f0a500';
       ctx.font = `${SIZE * .024}px Arial`;
-      ctx.fillText(`✨ 满级 · 累计 ${this.skinPoints} 分`, CX, barY + SIZE * .05);
+      ctx.fillText(`✨ 满级 · 累计 ${this.skinPoints} 分`, CX, barY + V * .05);
     } else if (this.skinPoints >= nextCost) {
       ctx.fillStyle = '#f0a500';
       ctx.font = `${SIZE * .022}px Arial`;
-      ctx.fillText('已达标！再杀几个番茄就能升级', CX, barY + SIZE * .05);
+      ctx.fillText('已达标！再杀几个番茄就能升级', CX, barY + V * .05);
     } else {
       const progress = Math.max(0, (this.skinPoints - curCost) / (nextCost - curCost));
       ctx.fillStyle = '#c8e6c9';
@@ -866,75 +1203,130 @@ class Game {
       ctx.fillStyle = '#7a9a79';
       ctx.font = `${SIZE * .02}px Arial`;
       const need = Math.max(1, nextCost - this.skinPoints);
-      ctx.fillText(`再得 ${need} 分 → ${skinLabel[nextSkin]}`, CX, barY + barH + SIZE * .025);
+      ctx.fillText(`再得 ${need} 分 → ${skinLabel[nextSkin]}`, CX, barY + barH + V * .025);
     }
+    // Mode selector
+    const modeBtnW = SIZE * .16;
+    const modeBtnH = SIZE * .055;
+    const modeBtnY = CY + V * .17;
+    const modeGap = SIZE * .02;
+    const normalX = CX - modeBtnW - modeGap / 2;
+    const hardX = CX + modeGap / 2;
+    // Normal mode button
+    ctx.fillStyle = this.mode === 'normal' ? '#66bb6a' : '#c8e6c9';
+    ctx.beginPath();
+    ctx.roundRect(normalX, modeBtnY, modeBtnW, modeBtnH, 6);
+    ctx.fill();
+    ctx.fillStyle = this.mode === 'normal' ? '#fff' : '#7a9a79';
+    ctx.font = `bold ${SIZE * .028}px Arial`;
+    ctx.textAlign = 'center';
+    ctx.fillText('温泉蛋', normalX + modeBtnW / 2, modeBtnY + modeBtnH * .68);
+    // Hard mode button
+    ctx.fillStyle = this.mode === 'hard' ? '#ef5350' : '#c8e6c9';
+    ctx.beginPath();
+    ctx.roundRect(hardX, modeBtnY, modeBtnW, modeBtnH, 6);
+    ctx.fill();
+    ctx.fillStyle = this.mode === 'hard' ? '#fff' : '#7a9a79';
+    ctx.font = `bold ${SIZE * .028}px Arial`;
+    ctx.fillText('地狱蛋', hardX + modeBtnW / 2, modeBtnY + modeBtnH * .68);
+    const startBtnY = CY + V * .24;
+    const startBtnH = SIZE * .07;
     ctx.fillStyle = '#81c784';
     ctx.beginPath();
-    ctx.roundRect(CX - SIZE * .18, CY + SIZE * .20, SIZE * .36, SIZE * .07, 8);
+    ctx.roundRect(CX - SIZE * .18, startBtnY, SIZE * .36, startBtnH, 8);
     ctx.fill();
     ctx.fillStyle = '#fff';
     ctx.font = `bold ${SIZE * .04}px Arial`;
-    ctx.fillText('开始游戏', CX, CY + SIZE * .248);
+    ctx.fillText('开始游戏', CX, startBtnY + startBtnH * .68);
+    // Achievements grid: 4 per row, 2 rows
+    ctx.textAlign = 'center';
+    const names = ACHIEVEMENTS.map(a => ({ icon: a.icon, name: a.name, unlocked: this.achievements.includes(a.id) }));
+    const colW = SIZE * .24;
+    const rowH = SIZE * .05;
+    const gridY = CY + V * .38;
+    const gridX = CX - SIZE * .48;
+    // Reset data centered between start button and grid
+      const resetY = (startBtnY + startBtnH) * .58 + gridY * .42;
     ctx.fillStyle = '#bbb';
     ctx.font = `${SIZE * .024}px Arial`;
-    ctx.fillText('重置数据', CX, CY + SIZE * .30);
-    // Achievements grid: 4 per row, 2 rows
-    const achFont = SIZE * .028;
-    ctx.font = `${achFont}px Arial`;
-    ctx.textAlign = 'left';
-    const names = ACHIEVEMENTS.map(a => ({ icon: a.icon, name: a.name, unlocked: this.achievements.includes(a.id) }));
-    const colW = SIZE * .23;
-    const rowH = SIZE * .034;
-    const gridY = CY + SIZE * .355;
-    const gridX = CX - SIZE * .43;
+    ctx.fillText('重置数据', CX, resetY);
+    ctx.font = `${SIZE * .03}px Arial`;
     for (let i = 0; i < names.length; i++) {
       const col = i % 4;
       const row = Math.floor(i / 4);
-      const gx = gridX + col * colW;
+      const cellCx = gridX + col * colW + colW / 2;
       const gy = gridY + row * rowH;
-      ctx.fillStyle = names[i].unlocked ? '#4a7c59' : '#ccc';
-      ctx.fillText(names[i].icon, gx, gy);
-      ctx.fillStyle = names[i].unlocked ? '#6a9c79' : '#aaa';
-      ctx.fillText(names[i].name, gx + SIZE * .036, gy);
+      const label = names[i].icon + ' ' + names[i].name;
+      const tw = ctx.measureText(label).width;
+      if (names[i].unlocked) {
+        ctx.save();
+        ctx.shadowColor = 'rgba(46,125,50,.35)';
+        ctx.shadowBlur = 6;
+        ctx.fillStyle = '#c8e6c9';
+        ctx.beginPath();
+        ctx.roundRect(cellCx - tw / 2 - 6, gy - rowH * .6, tw + 12, rowH * .8, 8);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        ctx.strokeStyle = '#a5d6a7';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+        ctx.restore();
+        ctx.fillStyle = '#1b5e20';
+      } else {
+        ctx.fillStyle = '#ccc';
+      }
+      ctx.fillText(label, cellCx, gy);
     }
     ctx.textAlign = 'center';
   }
 
   drawGameOver() {
     ctx.fillStyle = 'rgba(0,0,0,.7)';
-    ctx.fillRect(0, 0, SIZE, SIZE);
+    ctx.fillRect(0, 0, CW, CH);
+    const V = Math.max(SIZE, CH * .7);
     ctx.fillStyle = '#ef5350';
     ctx.font = `bold ${SIZE * .09}px Arial`;
     ctx.textAlign = 'center';
-    ctx.fillText('💀 盘子被番茄占领', CX, CY - SIZE * .25);
+    ctx.fillText('💀 盘子被番茄占领', CX, CY - V * .30);
+    ctx.fillStyle = '#bdbdbd';
+    ctx.font = `${SIZE * .028}px Arial`;
+    const secs = Math.floor(this.survivalTime);
+    ctx.fillText(getSurvivalTag(secs), CX, CY - V * .24);
     ctx.fillStyle = '#fff';
     ctx.font = `${SIZE * .05}px Arial`;
-    const secs = Math.floor(this.survivalTime);
-    ctx.fillText(`存活 ${secs} 秒`, CX, CY - SIZE * .16);
-    ctx.fillText(`得分: ${this.score}`, CX, CY - SIZE * .09);
+    ctx.fillText(`存活 ${secs} 秒`, CX, CY - V * .17);
+    ctx.fillText(`得分: ${this.score}`, CX, CY - V * .10);
+    ctx.fillStyle = '#bdbdbd';
+    ctx.font = `${SIZE * .028}px Arial`;
+    const modeLabel = this.mode === 'normal' ? '温泉蛋' : '地狱蛋';
+    ctx.fillText(`模式: ${modeLabel}`, CX, CY - V * .03);
     const isNewBest = secs >= this.bestTime;
     if (isNewBest && secs > 0) {
       ctx.fillStyle = '#ffd700';
       ctx.font = `bold ${SIZE * .04}px Arial`;
-      ctx.fillText('🎉 新纪录！', CX, CY - SIZE * .03);
+      ctx.fillText('🎉 新纪录！', CX, CY + V * .04);
       this.bestTime = secs;
       this.saveProgress();
     } else if (this.bestTime > 0) {
       ctx.fillStyle = '#bdbdbd';
       ctx.font = `${SIZE * .035}px Arial`;
-      ctx.fillText(`最高纪录: ${Math.floor(this.bestTime)} 秒 (差 ${Math.floor(this.bestTime - secs)} 秒)`, CX, CY - SIZE * .03);
+      ctx.fillText(`最高纪录: ${Math.floor(this.bestTime)} 秒 (差 ${Math.floor(this.bestTime - secs)} 秒)`, CX, CY + V * .04);
     }
+    const retryBtnY = CY + V * .10;
+    const retryBtnH = SIZE * .08;
     ctx.fillStyle = '#81c784';
-    ctx.fillRect(CX - SIZE * .2, CY + SIZE * .06, SIZE * .4, SIZE * .08);
+    ctx.fillRect(CX - SIZE * .2, retryBtnY, SIZE * .4, retryBtnH);
     ctx.fillStyle = '#fff';
     ctx.font = `bold ${SIZE * .05}px Arial`;
     ctx.textAlign = 'center';
-    ctx.fillText('再来一次', CX, CY + SIZE * .125);
+    ctx.fillText('再来一次', CX, retryBtnY + retryBtnH * .73);
+    const shareBtnY = CY + V * .23;
+    const shareBtnH = SIZE * .07;
     ctx.fillStyle = '#a5d6a7';
-    ctx.fillRect(CX - SIZE * .2, CY + SIZE * .17, SIZE * .4, SIZE * .07);
+    ctx.fillRect(CX - SIZE * .2, shareBtnY, SIZE * .4, shareBtnH);
     ctx.fillStyle = '#fff';
     ctx.font = `bold ${SIZE * .035}px Arial`;
-    ctx.fillText('📸 生成战绩', CX, CY + SIZE * .215);
+    ctx.fillText('📸 生成战绩', CX, shareBtnY + shareBtnH * .65);
   }
 
   gameOver() {
@@ -967,6 +1359,19 @@ class Game {
     ctx.ellipse(x, y - r * .05, r * 1.05, r * 1.1, 0, 0, Math.PI * 2);
     ctx.fillStyle = base;
     ctx.fill();
+    // 3D shading
+    const g = ctx.createRadialGradient(x - r * .25, y - r * .3, 0, x, y, r * 1.0);
+    g.addColorStop(0, 'rgba(255,255,255,.2)');
+    g.addColorStop(.4, 'rgba(255,255,255,0)');
+    g.addColorStop(.7, 'rgba(0,0,0,0)');
+    g.addColorStop(1, 'rgba(0,0,0,.1)');
+    ctx.fillStyle = g;
+    ctx.fill();
+    // Glossy highlight
+    ctx.beginPath();
+    ctx.ellipse(x - r * .25, y - r * .4, r * .2, r * .09, -0.3, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,.35)';
+    ctx.fill();
     if (skinName === '煎荷包蛋') {
       ctx.beginPath();
       ctx.arc(x, y + r * .05, r * .55, 0, Math.PI * 2);
@@ -976,24 +1381,55 @@ class Game {
       ctx.arc(x, y + r * .05, r * .45, 0, Math.PI * 2);
       ctx.fillStyle = '#ff8f00';
       ctx.fill();
-      ctx.fillStyle = '#333';
+    } else if (skinName === '溏心蛋') {
+      ctx.fillStyle = '#ffb300';
       ctx.beginPath();
-      ctx.arc(x - r * .25, y + r * .05, r * .1, 0, Math.PI * 2);
-      ctx.arc(x + r * .25, y + r * .05, r * .1, 0, Math.PI * 2);
+      ctx.arc(x, y + r * .02, r * .4, 0, Math.PI * 2);
       ctx.fill();
-    } else {
-      ctx.fillStyle = '#333';
+      ctx.fillStyle = '#ff8f00';
       ctx.beginPath();
-      ctx.arc(x - r * .3, y - r * .15, r * .12, 0, Math.PI * 2);
-      ctx.arc(x + r * .3, y - r * .15, r * .12, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = '#f80';
-      ctx.beginPath();
-      ctx.moveTo(x - r * .05, y - r * .05);
-      ctx.lineTo(x + r * .05, y - r * .05);
-      ctx.lineTo(x, y + r * .05);
+      ctx.arc(x, y + r * .02, r * .3, 0, Math.PI * 2);
       ctx.fill();
     }
+    // Eyes
+    const eyeY = y - r * .12;
+    const eyeSep = r * .28;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.ellipse(x - eyeSep, eyeY, r * .15, r * .18, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x + eyeSep, eyeY, r * .15, r * .18, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.arc(x - eyeSep, eyeY, r * .09, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + eyeSep, eyeY, r * .09, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(x - eyeSep - r * .03, eyeY - r * .04, r * .035, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(x + eyeSep - r * .03, eyeY - r * .04, r * .035, 0, Math.PI * 2);
+    ctx.fill();
+    // Blush
+    ctx.fillStyle = 'rgba(255,140,140,.25)';
+    ctx.beginPath();
+    ctx.ellipse(x - r * .36, y + r * .08, r * .14, r * .09, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(x + r * .36, y + r * .08, r * .14, r * .09, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Mouth
+    ctx.fillStyle = '#e07040';
+    ctx.beginPath();
+    ctx.moveTo(x - r * .08, y + r * .14);
+    ctx.quadraticCurveTo(x, y + r * .22, x + r * .08, y + r * .14);
+    ctx.lineTo(x - r * .08, y + r * .14);
+    ctx.fill();
     ctx.restore();
   }
 
@@ -1017,19 +1453,39 @@ class Game {
 
   handleClick(x, y) {
     if (this.state === 'menu') {
-      if (x > CX - SIZE * .18 && x < CX + SIZE * .18 && y > CY + SIZE * .20 && y < CY + SIZE * .27) {
+      const V = Math.max(SIZE, CH * .7);
+      // Mode selector buttons
+      const modeBtnW = SIZE * .16;
+      const modeBtnH = SIZE * .055;
+      const modeBtnY = CY + V * .17;
+      const modeGap = SIZE * .02;
+      if (y > modeBtnY && y < modeBtnY + modeBtnH) {
+        if (x > CX - modeBtnW - modeGap / 2 && x < CX - modeGap / 2) {
+          this.mode = 'normal';
+          this.updatePlateR();
+          this.saveProgress();
+        } else if (x > CX + modeGap / 2 && x < CX + modeBtnW + modeGap / 2) {
+          this.mode = 'hard';
+          this.updatePlateR();
+          this.saveProgress();
+        }
+      }
+      const startBtnY = CY + V * .24;
+      const startBtnH = SIZE * .07;
+      const gridY = CY + V * .38;
+    const resetY = (startBtnY + startBtnH) * .58 + gridY * .42;
+      if (x > CX - SIZE * .18 && x < CX + SIZE * .18 && y > startBtnY && y < startBtnY + startBtnH) {
         this.startGame();
       }
-      if (y > CY + SIZE * .28 && y < CY + SIZE * .33) {
+      if (y > resetY - SIZE * .01 && y < resetY + SIZE * .04) {
         this.resetData();
       }
       // Achievement grid click
-    const colW = SIZE * .23;
-    const gridY = CY + SIZE * .355;
-      const rowH = SIZE * .034;
-      if (y > gridY - rowH && y < gridY + rowH * 2) {
+    const colW = SIZE * .24;
+      const rowH = SIZE * .05;
+      if (y > gridY - rowH * .5 && y < gridY + rowH * 2) {
         const row = Math.floor((y - gridY) / rowH);
-        const col = Math.floor((x - (CX - SIZE * .43)) / colW);
+        const col = Math.floor((x - (CX - SIZE * .48)) / colW);
         const idx = row * 4 + col;
         if (idx >= 0 && idx < ACHIEVEMENTS.length) {
           const a = ACHIEVEMENTS[idx];
@@ -1038,10 +1494,11 @@ class Game {
         }
       }
     } else if (this.state === 'gameover') {
-      if (x > CX - SIZE * .2 && x < CX + SIZE * .2 && y > CY + SIZE * .06 && y < CY + SIZE * .14) {
+      const V = Math.max(SIZE, CH * .7);
+      if (x > CX - SIZE * .2 && x < CX + SIZE * .2 && y > CY + V * .10 && y < CY + V * .10 + SIZE * .08) {
         this.startGame();
       }
-      if (x > CX - SIZE * .2 && x < CX + SIZE * .2 && y > CY + SIZE * .17 && y < CY + SIZE * .24) {
+      if (x > CX - SIZE * .2 && x < CX + SIZE * .2 && y > CY + V * .23 && y < CY + V * .23 + SIZE * .07) {
         this.sharePoster();
       }
     }
@@ -1072,14 +1529,14 @@ class Game {
     pctx.font = 'bold 40px Arial';
     pctx.fillText('🥚 蛋蛋快跑', PW / 2, 80);
     pctx.fillStyle = '#8aa899';
-    pctx.font = '18px Arial';
-    pctx.fillText('在番茄围攻中活下来！越久越好！', PW / 2, 115);
+    pctx.font = '16px Arial';
+    pctx.fillText(getSurvivalTag(secs), PW / 2, 110);
     // Divider
     pctx.strokeStyle = 'rgba(255,255,255,.1)';
     pctx.lineWidth = 1;
     pctx.beginPath();
-    pctx.moveTo(60, 140);
-    pctx.lineTo(PW - 60, 140);
+    pctx.moveTo(60, 135);
+    pctx.lineTo(PW - 60, 135);
     pctx.stroke();
     // Egg preview (inline drawSkinPreview for poster context)
     const colors = { normal: ['#ebd6b0','#c9a87c'], 溏心蛋: ['#fff5cc','#ffb300'], 煎荷包蛋: ['#fff','#ff8f00'], 茶叶蛋: ['#c4956a','#6d4c00'] };
@@ -1139,20 +1596,24 @@ class Game {
     pctx.fillStyle = '#6a9c79';
     pctx.font = '18px Arial';
     pctx.fillText(`段位: ${skinLabel[this.currentSkin] || '普通蛋'}`, PW / 2, 560);
+    const modeLabel = this.mode === 'normal' ? '温泉蛋' : '地狱蛋';
+    pctx.fillStyle = '#8aa899';
+    pctx.font = '16px Arial';
+    pctx.fillText(`模式: ${modeLabel}`, PW / 2, 590);
     // Best record
     if (isNewBest && secs > 0) {
       pctx.fillStyle = '#ffd700';
       pctx.font = 'bold 28px Arial';
-      pctx.fillText('🎉 新纪录！', PW / 2, 610);
+      pctx.fillText('🎉 新纪录！', PW / 2, 635);
     } else if (this.bestTime > 0) {
       pctx.fillStyle = '#888';
       pctx.font = '18px Arial';
-      pctx.fillText(`最高纪录: ${Math.floor(this.bestTime)} 秒`, PW / 2, 610);
+      pctx.fillText(`最高纪录: ${Math.floor(this.bestTime)} 秒`, PW / 2, 635);
     }
     // Footer
-    pctx.fillStyle = 'rgba(74,124,89,.2)';
-    pctx.font = '14px Arial';
-    pctx.fillText('蛋蛋快跑 · 番茄大追杀', PW / 2, PH - 30);
+    pctx.fillStyle = 'rgba(74,124,89,.65)';
+    pctx.font = 'bold 17px Arial';
+    pctx.fillText('蛋蛋快跑 · 番茄大追杀', PW / 2, PH - 40);
     // Generate & share
     c.toBlob(blob => {
       const url = URL.createObjectURL(blob);
@@ -1176,7 +1637,7 @@ function handleTouchStart(e) {
   tapTime = Date.now();
   if (game && game.state === 'playing') {
     const rect = canvas.getBoundingClientRect();
-    game.egg.moveTo((t.clientX - rect.left) / rect.width * SIZE, (t.clientY - rect.top) / rect.height * SIZE);
+    game.egg.moveTo((t.clientX - rect.left) / rect.width * CW, (t.clientY - rect.top) / rect.height * CH);
   }
 }
 
@@ -1185,8 +1646,8 @@ function handleTouchMove(e) {
   for (let t of e.changedTouches) {
     if (t.identifier === touchId) {
       const rect = canvas.getBoundingClientRect();
-      const x = (t.clientX - rect.left) / rect.width * SIZE;
-      const y = (t.clientY - rect.top) / rect.height * SIZE;
+      const x = (t.clientX - rect.left) / rect.width * CW;
+      const y = (t.clientY - rect.top) / rect.height * CH;
       if (game && game.state === 'playing') {
         game.egg.moveTo(x, y);
       }
@@ -1200,8 +1661,8 @@ function handleTouchEnd(e) {
   for (let t of e.changedTouches) {
     if (t.identifier === touchId) {
       const rect = canvas.getBoundingClientRect();
-      const x = (t.clientX - rect.left) / rect.width * SIZE;
-      const y = (t.clientY - rect.top) / rect.height * SIZE;
+      const x = (t.clientX - rect.left) / rect.width * CW;
+      const y = (t.clientY - rect.top) / rect.height * CH;
       if (game.state === 'playing') {
         game.eggSplash();
         game.egg.target = null;
@@ -1223,8 +1684,8 @@ canvas.addEventListener('mousedown', e => {
   const rect = canvas.getBoundingClientRect();
   touchX = e.clientX;
   touchY = e.clientY;
-  const x = (e.clientX - rect.left) / rect.width * SIZE;
-  const y = (e.clientY - rect.top) / rect.height * SIZE;
+  const x = (e.clientX - rect.left) / rect.width * CW;
+  const y = (e.clientY - rect.top) / rect.height * CH;
   tapTime = Date.now();
   if (game && game.state === 'playing') {
     game.egg.moveTo(x, y);
@@ -1235,16 +1696,16 @@ canvas.addEventListener('mousedown', e => {
 canvas.addEventListener('mousemove', e => {
   if (e.buttons & 1 && game && game.state === 'playing') {
     const rect = canvas.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / rect.width * SIZE;
-    const y = (e.clientY - rect.top) / rect.height * SIZE;
+    const x = (e.clientX - rect.left) / rect.width * CW;
+    const y = (e.clientY - rect.top) / rect.height * CH;
     game.egg.moveTo(x, y);
   }
 });
 
 canvas.addEventListener('mouseup', e => {
   const rect = canvas.getBoundingClientRect();
-  const x = (e.clientX - rect.left) / rect.width * SIZE;
-  const y = (e.clientY - rect.top) / rect.height * SIZE;
+  const x = (e.clientX - rect.left) / rect.width * CW;
+  const y = (e.clientY - rect.top) / rect.height * CH;
   if (game && game.state === 'playing') {
     game.eggSplash();
     game.egg.target = null;
@@ -1266,6 +1727,12 @@ function gameLoop(time) {
 game = new Game();
 game.draw();
 requestAnimationFrame(gameLoop);
+window.addEventListener('resize', () => {
+  if (!game) return;
+  resizeCanvas(game.mode);
+  game.egg.moveTo(game.egg.pos.x, game.egg.pos.y);
+  game.draw();
+});
 </script>
 </body>
 </html>
