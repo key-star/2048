@@ -5,11 +5,6 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>2048</title>
 <style>
-.dpad { display: flex; flex-direction: column; align-items: center; gap: 4px; margin-top: 16px; }
-.dpad-row { display: flex; gap: 4px; }
-.dpad-btn { width: 64px; height: 64px; border: none; border-radius: 8px; background: #bbada0; color: #fff; font-size: 28px; cursor: pointer; display: flex; align-items: center; justify-content: center; user-select: none; -webkit-tap-highlight-color: transparent; }
-.dpad-btn:active { background: #9f8b76; }
-.dpad-btn.empty { background: transparent; pointer-events: none; }
 * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
 body { background: #faf8ef; font-family: Arial, sans-serif; display: flex; justify-content: center; padding-top: 40px; touch-action: none; }
 .container { width: 500px; max-width: 94vw; }
@@ -62,10 +57,7 @@ h1 { font-size: 64px; font-weight: bold; color: #776e65; }
     <div class="grid-bg" id="grid"></div>
     <div class="msg" id="msg"><p></p></div>
   </div>
-  <div class="dpad" id="dpad">
-    <div class="dpad-row"><button class="dpad-btn empty"></button><button class="dpad-btn" data-dir="2">▲</button><button class="dpad-btn empty"></button></div>
-    <div class="dpad-row"><button class="dpad-btn" data-dir="0">◀</button><button class="dpad-btn" data-dir="3">▼</button><button class="dpad-btn" data-dir="1">▶</button></div>
-  </div>
+  <div class="restart-wrap" id="restartWrap"></div>
 </div>
 <script>
 const SIZE = 4;
@@ -143,15 +135,9 @@ function transpose(m) { return m[0].map((_, i) => m.map(r => r[i])); }
 
 function showMsg(text) {
   msgEl.querySelector('p').textContent = text;
-  let btn = msgEl.querySelector('button');
-  if (!btn) {
-    btn = document.createElement('button');
-    btn.className = 'btn';
-    btn.textContent = '再来一局';
-    btn.onclick = startGame;
-    msgEl.appendChild(btn);
-  }
   msgEl.classList.add('show');
+  const wrap = document.getElementById('restartWrap');
+  wrap.innerHTML = '<div style="text-align:center;margin-top:16px"><button class="btn" onclick="startGame()">再来一局</button></div>';
 }
 
 function checkGameOver() {
@@ -172,14 +158,11 @@ function render() {
   saveState();
 }
 
-function startGame() { localStorage.removeItem('game2048'); msgEl.classList.remove('show'); initGrid(); }
+function startGame() { localStorage.removeItem('game2048'); msgEl.classList.remove('show'); document.getElementById('restartWrap').innerHTML = ''; initGrid(); }
 
 document.addEventListener('keydown', e => {
   if (e.key.startsWith('Arrow')) { e.preventDefault(); move({ArrowLeft:0,ArrowRight:1,ArrowUp:2,ArrowDown:3}[e.key]); }
 });
-
-document.getElementById('dpad').addEventListener('click', e => { const d = e.target.dataset.dir; if (d !== undefined) move(+d); });
-
 let mouseX, mouseY, mouseDown = false;
 document.addEventListener('mousedown', e => { mouseX = e.clientX; mouseY = e.clientY; mouseDown = true; });
 document.addEventListener('mouseup', e => {
